@@ -1,0 +1,26 @@
+{% macro field_list(values) -%}
+<dl class="fields">
+  {% for name, value in values.items() %}
+    <dt>{{ name | replace("_", " ") }}</dt>
+    <dd>
+      {%- if value is mapping -%}
+        {% for key, item in value.items() %}{{ key }}: {{ item }}{% if not loop.last %}; {% endif %}{% endfor %}
+      {%- elif value is iterable and value is not string -%}
+        {{ value | join(", ") }}
+      {%- elif value is sameas true -%}yes{%- elif value is sameas false -%}no
+      {%- elif value is none -%}<span class="muted">not set</span>
+      {%- else -%}{{ value }}{%- endif -%}
+    </dd>
+  {% endfor %}
+</dl>
+{%- endmacro %}
+
+{% macro badge(b) -%}
+<span class="pill">{{ b.principal_kind }}</span>
+<span class="pill {{ 'warn' if b.verification_tier < 1 else '' }}">tier {{ b.verification_tier }}</span>
+<span class="pill">{{ 'hosted agent' if b.agent_kind == 'hosted' else 'own agent' }}</span>
+{%- endmacro %}
+
+{% macro state_pill(state) -%}
+<span class="pill {{ 'warn' if state in ('declined', 'handoff_pending') else '' }}">{{ state | replace("_", " ") }}</span>
+{%- endmacro %}

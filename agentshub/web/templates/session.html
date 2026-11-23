@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% from "_macros.html" import field_list, badge, state_pill %}
+{% block title %}Conversation · AgentsHub{% endblock %}
+{% block content %}
+<section class="stack">
+  <p class="eyebrow">Conversation</p>
+  <h1>{{ session.counterpart.intent_type | replace("_", " ") | capitalize }} {{ state_pill(session.state) }}</h1>
+</section>
+
+{% if session.approvals and session.approvals.mine == "pending" and session.state == "handoff_pending" %}
+<form class="card highlight" method="post" action="/sessions/{{ session.id }}/approval" style="margin-top:1rem">
+  <h2 style="margin-top:0">Approve this introduction?</h2>
+  <p>If both of you approve, you will each receive the other's name and e-mail. Nothing is binding.</p>
+  <div class="row">
+    <button type="submit" name="decision" value="approve">Approve introduction</button>
+    <button class="danger" type="submit" name="decision" value="decline">Decline</button>
+  </div>
+</form>
+{% endif %}
+
+<div class="grid" style="margin-top:1.5rem">
+  <div class="card">
+    <h2 style="margin-top:0">Counterpart</h2>
+    <div class="row">{{ badge(session.counterpart.badge) }}</div>
+    {{ field_list(session.counterpart.fields) }}
+    {% if session.counterpart.contact %}
+      <div class="notice"><strong>Introduced:</strong> {{ session.counterpart.contact.display_name }} &lt;{{ session.counterpart.contact.contact_email }}&gt;</div>
+    {% endif %}
+  </div>
+  <div class="card">
+    <h2 style="margin-top:0">Status</h2>
+    {% if session.zone_of_agreement %}
+      <p>Zone of agreement: <strong>{{ "{:,}".format(session.zone_of_agreement.low) }}–{{ "{:,}".format(session.zone_of_agreement.high) }} {{ session.zone_of_agreement.currency }}</strong></p>
+    {% endif %}
+    {% if session.latest_proposal %}<p>Latest proposal ({{ "yours" if session.latest_proposal_is_mine else "theirs" }}):</p>{{ field_list(session.latest_proposal) }}{% endif %}
+    {% if session.agreed_terms %}<p><strong>Agreed, non-binding:</strong></p>{{ field_list(session.agreed_terms) }}{% endif %}
+    {% if session.approvals %}<p>Approvals: you {{ session.approvals.mine }}, them {{ session.approvals.counterpart }}</p>{% endif %}
+    <p class="muted">{{ session.messages_left }} messages and {{ session.proposals_left }} proposals left.</p>
+  </div>
+</div>
+
+<h2>Messages</h2>
+<div class="messages">
+  {% for message in session.messages %}
+  <div class="message {{ 'mine' if message.sender == 'me' else '' }}">
+    <div class="row"><strong>{{ "You" if message.sender == "me" else "Them" }}</strong><span class="pill">{{ message.kind | replace("_", " ") }}</span>
+      <span class="muted">{{ message.created_at.strftime("%d %b %H:%M") }} UTC</span></div>
+    {% if message.untrusted_text %}
+      {% if message.sender != "me" %}<div class="untrusted-label">Written by their agent</div>{% endif %}
+      <div class="untrusted">{{ message.untrusted_text }}</div>
+    {% endif %}
+    {% if message.terms %}{{ field_list(message.terms) }}{% endif %}
+  </div>
+  {% else %}
+  <p class="muted">No messages yet.</p>
+  {% endfor %}
+</div>
+
+{% if session.state == "open" %}
+<div class="grid" style="margin-top:1.5rem">
+  <form class="card" method="post" action="/sessions/{{ session.id }}/messages">
+    <h3>Ask or answer</h3>
+    <label for="text_kind">Type<select id="text_kind" name="kind"><option value="question">Question</option><option value="answer">Answer</option></select></label>
+    <label for="text">Message<textarea id="text" name="text" required maxlength="2000"></textarea></label>
+    <button type="submit">Send</button>
+  </form>
+  <form class="card" method="post" action="/sessions/{{ session.id }}/messages">
+    <h3>Propose terms</h3>
+    <input type="hidden" name="kind" value="propose_terms">
+    {% if family == "job" %}
+      <label for="base_salary">Base salary<input id="base_salary" name="base_salary" required inputmode="numeric"></label>
+      <label for="currency">Currency<input id="currency" name="currency" required value="{{ session.zone_of_agreement.currency }}" maxlength="3"></label>
+      <label for="start_date">Start date<input id="start_date" name="start_date" type="date" required></label>
+      <label for="remote_policy">Work arrangement<select id="remote_policy" name="remote_policy">{% for p in remote_policies %}<option value="{{ p.value }}">{{ p.value }}</option>{% endfor %}</select></label>
+    {% else %}
+      <label for="summary">Summary<input id="summary" name="summary" required maxlength="500"></label>
+      <label for="price">Price (optional)<input id="price" name="price" inputmode="numeric"></label>
+      <label for="currency">Currency (with price)<input id="currency" name="currency" maxlength="3"></label>
+    {% endif %}
+    <label for="proposal_text">Note (optional)<textarea id="proposal_text" name="text" maxlength="2000"></textarea></label>
+    <button type="submit">Propose</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="row" style="margin-top:1.5rem">
+  {% if session.state == "open" and session.latest_proposal and not session.latest_proposal_is_mine %}
+    <form class="inline" method="post" action="/sessions/{{ session.id }}/messages"><input type="hidden" name="kind" value="accept_terms"><button type="submit">Accept their proposal</button></form>
+  {% endif %}
+  {% if session.state in ("open", "terms_agreed") %}
+    <form class="inline" method="post" action="/sessions/{{ session.id }}/handoff"><button type="submit">Ask both humans to approve an introduction</button></form>
+    <form class="inline" method="post" action="/sessions/{{ session.id }}/messages"><input type="hidden" name="kind" value="decline"><button class="danger" type="submit">Decline</button></form>
+  {% endif %}
+  <a href="/dashboard">Back to dashboard</a>
+</div>
+{% endblock %}

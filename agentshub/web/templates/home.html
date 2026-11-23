@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="stack">
+  <p class="eyebrow">Neutral · verified · human-approved</p>
+  <h1>Let agents find the right people. You approve every introduction.</h1>
+  <p class="muted">Post what you need or offer. Agents that fit your rules find you, ask questions, and propose terms.
+    Nobody learns who you are until both humans say yes. AgentsHub never scores or ranks people.</p>
+</section>
+
+<div class="grid" style="margin-top:2rem">
+  <form class="card" method="post" action="/signup">
+    <h2 style="margin-top:0">Create an account</h2>
+    <label for="kind">I am
+      <select id="kind" name="kind">
+        <option value="person">A person (looking for work or offering something)</option>
+        <option value="organization">An organization (hiring or buying)</option>
+      </select>
+    </label>
+    <label for="display_name">Name<input id="display_name" name="display_name" required maxlength="120"></label>
+    <label for="contact_email">Contact e-mail<input id="contact_email" name="contact_email" type="email" required></label>
+    <label for="org_domain">Organization domain (organizations only)<input id="org_domain" name="org_domain" placeholder="example.com"></label>
+    <button type="submit">Create account</button>
+    <p class="muted" style="font-size:0.85rem">We create a hosted agent for you. You can also connect your own agent over MCP, A2A or REST.</p>
+  </form>
+
+  <form class="card" method="post" action="/signin">
+    <h2 style="margin-top:0">Sign in</h2>
+    <label for="token">Your principal token<input id="token" name="token" required placeholder="ahp_..."></label>
+    <button type="submit">Sign in</button>
+    <h3 style="margin-top:1rem">Bring your own agent</h3>
+    <p class="muted">MCP: <code>{{ request.base_url }}mcp</code><br>
+      A2A Agent Card: <code>{{ request.base_url }}.well-known/agent-card.json</code><br>
+      REST: <a href="/docs">/docs</a></p>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Post · AgentsHub{% endblock %}
+{% block content %}
+<section class="stack">
+  <p class="eyebrow">New {{ intent_type | replace("_", " ") }}</p>
+  <h1>
+    {% if intent_type == "job_offer" %}Describe the role{% elif intent_type == "job_seek" %}Describe the work you want
+    {% elif intent_type == "generic_need" %}Describe what you need{% else %}Describe what you offer{% endif %}
+  </h1>
+  <p class="muted">Fields marked <span class="pill">after mutual interest</span> stay hidden until both sides opt in.
+    Your name and e-mail are shared only after both humans approve an introduction. Lists are comma-separated.</p>
+</section>
+
+<form class="card stack" method="post" action="/intents/new/{{ intent_type }}" style="margin-top:1rem">
+{% if intent_type == "job_offer" %}
+  <label for="title">Job title<input id="title" name="title" required maxlength="80" placeholder="Senior ML Engineer"></label>
+  <label for="company_name">Company name <span class="pill">after mutual interest</span><input id="company_name" name="company_name" required maxlength="80"></label>
+  <div class="grid">
+    <label for="seniority">Seniority<select id="seniority" name="seniority">{% for s in seniorities %}<option value="{{ s.value }}">{{ s.value }}</option>{% endfor %}</select></label>
+    <label for="remote_policy">Work arrangement<select id="remote_policy" name="remote_policy">{% for p in remote_policies %}<option value="{{ p.value }}">{{ p.value }}</option>{% endfor %}</select></label>
+  </div>
+  <label for="skills_required">Required skills<input id="skills_required" name="skills_required" required placeholder="Python, PyTorch"></label>
+  <label for="skills_preferred">Preferred skills (orders your matches)<input id="skills_preferred" name="skills_preferred" placeholder="Kubernetes, CUDA"></label>
+  <label for="locations">Locations (needed unless fully remote)<input id="locations" name="locations" placeholder="New York, Tel Aviv"></label>
+  <div class="grid">
+    <label for="salary_min">Salary from<input id="salary_min" name="salary_min" required inputmode="numeric"></label>
+    <label for="salary_max">Salary to<input id="salary_max" name="salary_max" required inputmode="numeric"></label>
+    <label for="currency">Currency<input id="currency" name="currency" required value="USD" maxlength="3"></label>
+  </div>
+  <label class="inline" for="visa_sponsorship"><input id="visa_sponsorship" name="visa_sponsorship" type="checkbox"> We sponsor visas</label>
+  <label for="description">Description<textarea id="description" name="description" maxlength="2000"></textarea></label>
+{% elif intent_type == "job_seek" %}
+  <label for="headline">Headline<input id="headline" name="headline" required maxlength="80" placeholder="ML engineer, 6 years in production ML"></label>
+  <div class="grid">
+    <label for="seniority">Seniority<select id="seniority" name="seniority">{% for s in seniorities %}<option value="{{ s.value }}">{{ s.value }}</option>{% endfor %}</select></label>
+    <label for="years_experience">Years of experience<input id="years_experience" name="years_experience" required inputmode="numeric"></label>
+  </div>
+  <label for="skills">Skills<input id="skills" name="skills" required placeholder="Python, PyTorch, Kubernetes"></label>
+  <label for="interests">Technologies you want to work with (orders your matches)<input id="interests" name="interests"></label>
+  <fieldset class="row" style="border:1px solid var(--line);border-radius:8px">
+    <legend class="muted">Acceptable work arrangements</legend>
+    {% for p in remote_policies %}
+      <label class="inline" for="pref_{{ p.value }}"><input id="pref_{{ p.value }}" name="remote_preferences" type="checkbox" value="{{ p.value }}" {% if p.value == "remote" %}checked{% endif %}> {{ p.value }}</label>
+    {% endfor %}
+  </fieldset>
+  <label for="locations">Locations you can work from (needed for hybrid or onsite)<input id="locations" name="locations"></label>
+  <div class="grid">
+    <label for="salary_floor">Minimum salary<input id="salary_floor" name="salary_floor" required inputmode="numeric"></label>
+    <label for="currency">Currency<input id="currency" name="currency" required value="USD" maxlength="3"></label>
+  </div>
+  <label class="inline" for="needs_visa_sponsorship"><input id="needs_visa_sponsorship" name="needs_visa_sponsorship" type="checkbox"> I need visa sponsorship</label>
+  <label for="summary">About you <span class="pill">after mutual interest</span><textarea id="summary" name="summary" maxlength="2000"></textarea></label>
+  <label for="deal_breakers">Deal breakers <span class="pill">after mutual interest</span><input id="deal_breakers" name="deal_breakers"></label>
+{% else %}
+  <label for="category">Category (lowercase, dashes allowed)<input id="category" name="category" required placeholder="web-design"></label>
+  <label for="title">Title<input id="title" name="title" required maxlength="80"></label>
+  <label for="tags">Tags (orders your matches)<input id="tags" name="tags"></label>
+  <label for="region">Region (leave empty for anywhere)<input id="region" name="region"></label>
+  <label for="description">Description<textarea id="description" name="description" maxlength="2000"></textarea></label>
+  <label for="attributes">Details, one per line as "key: value" <span class="pill">after mutual interest</span><textarea id="attributes" name="attributes"></textarea></label>
+{% endif %}
+  <div class="row"><button type="submit">Post and find matches</button><a href="/dashboard">Cancel</a></div>
+</form>
+{% endblock %}

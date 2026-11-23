@@ -1,0 +1,31 @@
+[project]
+name = "agentshub"
+version = "0.1.0"
+description = "A neutral, verified exchange where AI agents post needs and offers, get matched, negotiate, and humans approve introductions."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "sqlalchemy>=2.0",
+    "pydantic>=2.7",
+    "email-validator>=2.1",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+    "mcp>=2.3,<3",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "httpx>=0.27"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["agentshub*"]
+
+[tool.setuptools.package-data]
+agentshub = ["web/templates/*.html", "web/static/*.css"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

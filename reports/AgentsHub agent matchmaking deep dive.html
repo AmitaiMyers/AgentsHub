@@ -1,0 +1,1167 @@
+<title>AgentsHub Deep Dive</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a long-form research document with a sticky contents rail on wide screens, one reading column, and a decisions panel the reader answers by clicking. */
+:root {
+  --bg: #F3F5F7;
+  --surface: #FFFFFF;
+  --ink: #15202B;
+  --muted: #586675;
+  --line: #D9E0E7;
+  --accent: #0C7566;
+  --accent-ink: #FFFFFF;
+  --accent-soft: #DFF1ED;
+  --warn: #A24E08;
+  --warn-soft: #FBEEDD;
+  --code-bg: #EBEFF3;
+  --font-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --step-0: 1rem;
+  --step-1: 1.2rem;
+  --step-2: 1.5rem;
+  --step-3: 2.1rem;
+  --step-4: clamp(2.2rem, 5vw, 3.2rem);
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0E141A; --surface: #151F28; --ink: #E4EBF1; --muted: #93A2B0; --line: #263441;
+    --accent: #3DC2AC; --accent-ink: #062520; --accent-soft: #123430; --warn: #F2A653; --warn-soft: #36260F; --code-bg: #1B2733;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0E141A; --surface: #151F28; --ink: #E4EBF1; --muted: #93A2B0; --line: #263441;
+  --accent: #3DC2AC; --accent-ink: #062520; --accent-soft: #123430; --warn: #F2A653; --warn-soft: #36260F; --code-bg: #1B2733;
+  color-scheme: dark;
+}
+
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+* { box-sizing: border-box; }
+a { color: var(--accent); text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible, textarea:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.page {
+  max-width: 1180px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 2.5rem 4rem;
+  display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 3rem;
+}
+@media (max-width: 900px) { .page { grid-template-columns: minmax(0, 1fr); gap: 0; } .toc { display: none; } }
+
+.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 1.5rem); align-self: start; font-size: 0.88rem; display: flex; flex-direction: column; gap: 1.25rem; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+.toc a { color: var(--muted); text-decoration: none; }
+.toc a:hover { color: var(--ink); }
+.toc .label { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+
+.progress-chip {
+  display: flex; flex-direction: column; gap: 0.5rem; padding: 0.85rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+}
+.progress-chip strong { font-family: var(--font-display); font-size: 1.05rem; }
+.bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.bar > span { display: block; height: 100%; background: var(--accent); width: 0; transition: width 0.3s ease; }
+
+main { min-width: 0; display: flex; flex-direction: column; gap: 3.25rem; }
+.content { max-width: 46rem; }
+
+header.top { display: flex; flex-direction: column; gap: 0.9rem; }
+.eyebrow { font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; line-height: 1.15; margin: 0; }
+h1 { font-size: var(--step-4); font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: var(--step-3); font-weight: 700; }
+h3 { font-size: var(--step-1); font-weight: 700; }
+p { margin: 0; }
+.lede { font-size: var(--step-1); color: var(--muted); max-width: 40rem; }
+.meta { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; font-family: var(--font-mono); font-size: 0.8rem; color: var(--muted); }
+.cta-row { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.btn {
+  font: 500 0.95rem var(--font-body); border-radius: 8px; padding: 0.6rem 1rem; cursor: pointer; border: 1px solid var(--accent); text-decoration: none; display: inline-flex; align-items: center; gap: 0.4rem;
+}
+.btn-primary { background: var(--accent); color: var(--accent-ink); }
+.btn-ghost { background: transparent; color: var(--accent); }
+
+section { display: flex; flex-direction: column; gap: 1.1rem; scroll-margin-top: 1.5rem; }
+section .num { font-family: var(--font-mono); font-size: 0.8rem; color: var(--accent); letter-spacing: 0.06em; }
+ul, ol { margin: 0; padding-left: 1.25rem; display: flex; flex-direction: column; gap: 0.5rem; }
+li { padding-left: 0.15rem; }
+strong { font-weight: 600; }
+
+.verdict { background: var(--accent-soft); border-radius: var(--radius); padding: 1.25rem 1.4rem; display: flex; flex-direction: column; gap: 0.5rem; }
+.verdict p:first-child { font-family: var(--font-display); font-size: var(--step-2); font-weight: 700; line-height: 1.25; }
+.callout { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 0.9rem 1.1rem; border-radius: 0 8px 8px 0; }
+.quote { font-family: var(--font-display); font-size: var(--step-1); border-left: 3px solid var(--accent); padding-left: 1rem; }
+
+.findings { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 1rem; list-style: none; padding: 0; }
+.findings li { padding: 1rem 1.1rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); display: flex; flex-direction: column; gap: 0.35rem; }
+.findings .k { font-family: var(--font-mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); }
+
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 40rem; font-size: 0.9rem; }
+th, td { text-align: left; vertical-align: top; padding: 0.7rem 0.85rem; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: none; }
+th { font-family: var(--font-mono); font-weight: 500; font-size: 0.74rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); background: var(--code-bg); }
+td:first-child { font-weight: 600; }
+.pill { display: inline-block; font-family: var(--font-mono); font-size: 0.72rem; padding: 0.1rem 0.5rem; border-radius: 999px; white-space: nowrap; }
+.pill.low { background: var(--accent-soft); color: var(--accent); }
+.pill.med { background: var(--warn-soft); color: var(--warn); }
+.pill.high { background: var(--warn); color: var(--surface); }
+
+pre, code { font-family: var(--font-mono); font-size: 0.85rem; }
+pre { background: var(--code-bg); border-radius: var(--radius); padding: 1rem 1.1rem; overflow-x: auto; margin: 0; line-height: 1.5; }
+code { background: var(--code-bg); padding: 0.05rem 0.3rem; border-radius: 4px; }
+pre code { background: none; padding: 0; }
+
+.arch { display: flex; flex-direction: column; gap: 0.5rem; }
+.arch .node { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 0.7rem 0.9rem; font-size: 0.92rem; }
+.arch .node.hub { border-color: var(--accent); }
+.arch .arrow { font-family: var(--font-mono); font-size: 0.8rem; color: var(--muted); padding-left: 1rem; }
+.arch ol { margin-top: 0.5rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 0.35rem 1.5rem; padding-left: 1.4rem; }
+
+/* Decisions */
+.decisions { gap: 1.5rem; }
+.decision-head { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 1rem; }
+.sync { font-family: var(--font-mono); font-size: 0.8rem; color: var(--muted); }
+.sync.warn { color: var(--warn); }
+.q { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.25rem; display: flex; flex-direction: column; gap: 0.9rem; }
+.q.answered { border-color: var(--accent); }
+.q-top { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; }
+.q-status { font-family: var(--font-mono); font-size: 0.75rem; color: var(--muted); white-space: nowrap; }
+.q.answered .q-status { color: var(--accent); }
+.q-why { color: var(--muted); font-size: 0.93rem; }
+.opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 0.6rem; }
+.opt {
+  text-align: left; font: inherit; color: var(--ink); background: var(--bg); border: 1.5px solid var(--line); border-radius: 8px; padding: 0.75rem 0.85rem; cursor: pointer;
+  display: flex; flex-direction: column; gap: 0.25rem; transition: border-color 0.15s ease, background 0.15s ease;
+}
+.opt:hover { border-color: var(--accent); }
+.opt[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.opt .t { font-weight: 600; display: flex; gap: 0.4rem; align-items: baseline; flex-wrap: wrap; }
+.opt .d { font-size: 0.85rem; color: var(--muted); }
+.opt .rec { font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--accent); }
+.opt:disabled { cursor: default; }
+.note label { display: block; font-size: 0.82rem; color: var(--muted); margin-bottom: 0.3rem; }
+.note textarea { width: 100%; min-height: 3.2rem; resize: vertical; font: inherit; font-size: 0.93rem; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 0.55rem 0.7rem; }
+.summary-box { display: flex; flex-direction: column; gap: 0.75rem; }
+.copy-status { font-size: 0.85rem; color: var(--muted); }
+
+details { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 0.8rem 1rem; }
+details summary { cursor: pointer; font-weight: 600; }
+details ul { margin-top: 0.75rem; font-size: 0.9rem; word-break: break-word; }
+
+footer { color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--line); padding-top: 1.25rem; }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+section h2 { font-size: var(--step-2); }
+.content { max-width: 52rem; }
+.verdict { font-size: 1.02rem; }
+.verdict p:first-child { font-family: var(--font-body); font-size: 1.02rem; font-weight: 400; line-height: 1.6; }
+</style>
+
+<div class="page">
+  <nav class="toc" aria-label="Contents">
+    <div class="progress-chip">
+      <span class="label">Your decisions</span>
+      <strong id="progress-text">0 of 7 answered</strong>
+      <div class="bar"><span id="progress-bar"></span></div>
+      <a href="#decisions">Go to questions</a>
+    </div>
+    <div>
+      <p class="label">Contents</p>
+      <ol>
+<li><a href="#sec-nine-findings-correct-the-earlier-lighter-report">What changed</a></li>
+<li><a href="#sec-funded-rivals-own-verticals-and-nobody-yet-owns-the-neutral-exchange">Competitors</a></li>
+<li><a href="#sec-open-protocols-cover-transport-leaving-matching-and-trust-to-the-hub">Technology</a></li>
+<li><a href="#sec-employers-pay-for-less-noise-so-charge-per-accepted-hand-off">Business model</a></li>
+<li><a href="#sec-ranking-candidates-turns-a-neutral-hub-into-a-regulated-hiring-agent">Risks and regulation</a></li>
+<li><a href="#sec-build-it-conditionally-with-a-90-day-gate-on-the-hiring-wedge">Recommendations</a></li>
+<li><a href="#sec-seven-decisions-the-founders-still-have-to-make">Open decisions</a></li>
+<li><a href="#decisions">Your decisions</a></li>
+<li><a href="#sec-conclusion">Conclusion</a></li>
+      </ol>
+    </div>
+  </nav>
+
+  <main>
+    <header class="top content">
+      <p class="eyebrow">Deep research report · Agent-to-agent hub</p>
+      <h1>AgentsHub Can Win by Selling Trust</h1>
+      <div class="meta"><span>23 November 2026</span><span>Global / US-first</span><span>5 research threads</span></div>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#decisions">Answer the 7 decisions</a>
+        <a class="btn btn-ghost" href="#sec-nine-findings-correct-the-earlier-lighter-report">Read the findings</a>
+      </div>
+      <div class="verdict"><p>Yes, build AgentsHub, but do not launch it as a general-purpose hub where any agent can find anything. Build it as a <strong>neutral, verified intent exchange</strong>. The protocol and schemas stay general, the go-to-market starts with one wedge, and the hub enforces identity, staged disclosure, human approval and audit while each principal's own agent does the choosing. The whitespace is real. As of November 2026, no funded company runs a bring-your-own-agent, cross-domain exchange that matches one principal's need to another principal's offer. The open protocols (A2A v1.0.1 and MCP 2026-07-28) deliberately leave discovery, matching and trust unstandardized. The window is narrower than the earlier, lighter report suggested, though. <strong>Jack &amp; Jill has raised about $60M to put agents on both sides of hiring</strong>, <strong>Meta bought Moltbook's agent-network team</strong>, Indeed runs a seeker agent and an employer agent inside one marketplace, and the frontier labs own the preference context that Anthropic's Project Swap identifies as the source of about 85% of a market's lost value. Today only the low tens of millions of people worldwide have an agent that could call a hub, and most of them are technical. "Agents finding agents" will not create liquidity by itself, so direct sales to employers and a hosted "lite agent" have to supply it. The most consequential new finding is legal. <strong>A hub that ranks or shortlists candidates is plausibly the employer's "agent" under California's FEHA rules and the <em>Mobley v. Workday</em> theory.</strong> It also risks being treated as an employment agency, faces a consumer-reporting (FCRA) risk if it scores candidates with third-party data, and would be a high-risk AI provider under the EU AI Act from 2 December 2027. The hiring module therefore has to run as a ring-fenced, rule-based exchange. On pricing, charge employers per accepted hand-off or per hire at a quarter to half of what an agency costs, keep candidates free, and defer payments rails and tokens. Then set a 90-day gate: if 10–30 AI-forward employers will not sign on as design partners, move the wedge to a less contested vertical.</p></div>
+    </header>
+
+<section class="content" id="sec-nine-findings-correct-the-earlier-lighter-report"><span class="num">01 · WHAT CHANGED</span><h2 id="nine-findings-correct-the-earlier-lighter-report">Nine findings correct the earlier, lighter report</h2>
+<p>The earlier report got the overall shape right: the plumbing exists, directories are not matchmakers, and trust is the product. Several of its facts have since been corrected or overtaken. The table lists each change and what it means for the build, so the rest of this report can stand on the current evidence.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Earlier report</th>
+<th>What the evidence now shows (Nov 2026)</th>
+<th>Consequence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A2A v1.0 date</td>
+<td>"v1.0 in 2026"; sources disagreed on January vs March</td>
+<td><strong>Stable v1.0.0 shipped 12 Mar 2026.</strong> The January 2026 date was a release candidate. v1.0.1 followed on 26 May 2026 and v1.1 is in progress (<a href="https://github.com/a2aproject/A2A/blob/main/CHANGELOG.md">A2A changelog</a>; <a href="https://github.com/a2aproject/A2A/blob/main/docs/roadmap.md">A2A roadmap</a>). A2A became an AAIF project in Aug 2026 (<a href="https://forkast.news/googles-a2a-protocol-joins-aaif-consolidating-the-agent-economys-protocol-layer-under-one-roof/">Forkast</a>)</td>
+<td>Build against v1.0.1 and track v1.1's planned "multi-round negotiation patterns"</td>
+</tr>
+<tr>
+<td>Hiring competitors</td>
+<td>Vertical matchmakers "tiny or pre-launch"; JobClaw and AgentHire named; "no dominant player"</td>
+<td><strong>Jack &amp; Jill</strong>: $40M Series A (Sept 2026), about $60M total, a candidate agent and an employer agent, 385K seekers and 5,350 companies (self-reported), 10% fee on hires (<a href="https://www.staffingindustry.com/news/global-daily-news/recruitment-chatbot-firm-jack-jill-lands-40m-following-last-years-20m-seed-round">SIA</a>; <a href="https://pulse2.com/jack-jill-raises-40-million-series-a/">Pulse 2.0</a>). JobClaw is an open-source repo, not a company. "AgentHire" is a name collision whose OpenClaw skill ClawHub flags as suspicious (<a href="https://clawhub.ai/lngdao/agenthire">ClawHub</a>)</td>
+<td>Hiring is contested by a funded player. The wedge has to be different, not just earlier</td>
+</tr>
+<tr>
+<td>Moltbook</td>
+<td>A warning, "low" as a competitor</td>
+<td><strong>Meta acquired Moltbook on 10 Mar 2026</strong>, and its founders joined Meta Superintelligence Labs (<a href="https://ny1.com/nyc/all-boroughs/ap-top-news/2026/03/10/meta-to-acquire-moltbook-the-social-network-for-ai-agents">AP via NY1</a>; <a href="https://www.techradar.com/pro/meta-snaps-up-ai-agent-social-network-moltbook-founders-will-join-meta-superintelligence-labs">TechRadar</a>)</td>
+<td>Meta becomes the most dangerous player in consumer agent-to-agent matching</td>
+</tr>
+<tr>
+<td>Legal classification</td>
+<td>"If the hub ranks or filters candidates" it joins an AEDT/high-risk system; matcher proposed as "hard filters + embedding rank"</td>
+<td>Ranking or screening for employers fits California's FEHA <strong>"agent"</strong> definition and the <em>Mobley</em> agent theory. Actively procuring candidates invites <strong>"employment agency"</strong> status. Scores built from third-party data invite <strong>FCRA</strong> claims (<em>Kistler v. Eightfold</em>). EU draft guidelines cite job-matching and ranking tools as high-risk, and "targeted job advertisements" are in scope (see section 4)</td>
+<td><strong>Remove hub-owned ranking from the hiring MVP</strong></td>
+</tr>
+<tr>
+<td>MCP</td>
+<td>Registry "in preview since Sept 2025"</td>
+<td>The <strong>2026-07-28 spec makes the core stateless</strong>. The registry holds about 55–65K entries and has no confirmed GA. ChatGPT's guidelines reject "pass-through intermediary" connectors (<a href="https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/blog/content/posts/2026-07-28-spec-ga/index.md">MCP blog</a>; <a href="https://developers.openai.com/apps-sdk/app-submission-guidelines">OpenAI guidelines</a>)</td>
+<td>Serverless-friendly build, plus a listing-policy risk</td>
+</tr>
+<tr>
+<td>Payments</td>
+<td>"Five practical attacks" on x402; AP2 "reportedly" at FIDO</td>
+<td><strong>More than 40 x402 vulnerabilities</strong> published across three 2026 papers, 31 of them in one study (<a href="https://arxiv.org/abs/2607.19545">arXiv 2607.19545</a>). AP2 confirmed donated to FIDO on 28 Apr 2026 at v0.2 (<a href="https://fidoalliance.org/google-donates-agent-payments-protocol-to-fido-alliance/">FIDO</a>)</td>
+<td>Keeping money out of v1 is now an easier call</td>
+</tr>
+<tr>
+<td>Project Swap "85%"</td>
+<td>Treated as an unverified secondary figure</td>
+<td>Anthropic's own write-up reports market efficiency of <strong>0.55 vs an optimum of 0.89</strong>, with <strong>about 85% of the shortfall from preference representation</strong> (<a href="https://www.anthropic.com/news/project-swap">Anthropic</a>)</td>
+<td>Preference elicitation is the core product</td>
+</tr>
+<tr>
+<td>OWASP numbering</td>
+<td>"Sources disagree"</td>
+<td>Top 10 for Agentic Applications released 9 Dec 2025 as <strong>ASI01–ASI10</strong> (<a href="https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/">OWASP</a>)</td>
+<td>Design against ASI01 (goal hijack) and ASI07 (inter-agent communication)</td>
+</tr>
+<tr>
+<td>Beachhead</td>
+<td>Remote backend/AI engineers; Israeli tech raised as an option</td>
+<td>AI/ML engineers at AI-forward startups is still favored, but LinkedIn Hiring Assistant 2 and Jack &amp; Jill target the same profiles. Israel now has <strong>0.95 tech openings per seeker</strong> (<a href="https://www.calcalistech.com/ctechnews/article/eh2q9m522">Calcalist</a>), which suits a community pilot, not the main market</td>
+<td>Wedge choice becomes a gated decision (section 6)</td>
+</tr>
+</tbody>
+</table></div>
+</section>
+<section class="content" id="sec-funded-rivals-own-verticals-and-nobody-yet-owns-the-neutral-exchange"><span class="num">02 · COMPETITORS</span><h2 id="funded-rivals-own-verticals-and-nobody-yet-owns-the-neutral-exchange">Funded rivals own verticals, and nobody yet owns the neutral exchange</h2>
+<h3 id="horizontal-agent-economies-are-big-on-paper-and-small-in-practice">Horizontal "agent economies" are big on paper and small in practice</h3>
+<p>The players that already let agents discover and transact with other agents are mostly crypto-native service-call markets. Their headline numbers fall apart under independent audit. Fetch.ai markets Agentverse as having about 3 million agents (<a href="https://cryptobriefing.com/fetch-ai-agent-marketplace-3-million-agents/">Crypto Briefing</a>), while an early-2026 audit reportedly found only <strong>about 36,000 protocol-active agents</strong> (<a href="https://finance.yahoo.com/technology/ai/articles/beyond-token-merger-analyzing-asi-185631531.html">Yahoo Finance</a>; the audit itself was not retrieved). Coinbase claims more than 165M x402 transactions and about $50M of volume (<a href="https://www.coinbase.com/developer-platform/discover/launches/agentic-market">Coinbase</a>), yet TRM Labs estimates genuinely agentic x402 volume at <strong>about $5,000–11,000 a month</strong> (<a href="https://www.trmlabs.com/trm-tech-blog/whos-actually-paying-measuring-ai-agent-payments-onchain">TRM Labs</a>). Olas reports 14.2M agent-to-agent transactions, but its marketplace protocol fee had collected <strong>$546.46 on $107,808 of turnover</strong> by August 2026 (<a href="https://www.rootdata.com/projects/detail/Autonolas?k=Nzk2NA%3D%3D">RootData</a>). Virtuals' daily revenue fell from a $1.02M peak to about $34.8K within two months once speculative incentives faded (<a href="https://decrypt.co/309495/virtuals-protocol-revenue-crashes-ai-agent-demand-sinks">Decrypt</a>). These networks share a structural blind spot. They match a <em>task</em> to a <em>service</em> ("call this API, pay per call") and never match one principal's need to another principal's offer. The closest product in shape to AgentsHub is Tobira, a free network where bring-your-own agents get handles, test each other's claims, and introduce their humans only after both agents agree and both humans approve. It has no disclosed funding or usage (<a href="https://www.producthunt.com/posts/tobira-ai">Product Hunt</a>). Pilot Protocol raised $4.5M in July 2026 to give every agent an address and encrypted transport (<a href="https://techstartups.com/2026/07/27/pilot-protocol-emerges-from-stealth-with-4-5m-to-build-the-internet-for-ai-agents/">TechStartups</a>). That is plumbing AgentsHub could run on, not a matchmaker.</p>
+<p>The lesson for strategy is that <strong>agent counts are a vanity metric and investors are learning to discount them.</strong> A credible hub should publish human-approved hand-offs and downstream outcomes from day one. That is also the only defense against the comparison with Moltbook, which claimed millions of agents but had about 17,000 human owners (<a href="https://www.techradar.com/pro/security/ai-agent-social-media-network-moltbook-is-a-security-disaster-millions-of-credentials-and-other-details-left-unsecured">TechRadar</a>).</p>
+<h3 id="verticals-are-where-agent-to-agent-matching-is-real-and-monetized">Verticals are where agent-to-agent matching is real and monetized</h3>
+<p>The money has gone to vertical players. <strong>Jack &amp; Jill</strong> is the closest funded analogue to the AgentsHub mechanic. "Jack" is a voice career-coach agent for job seekers, and "Jill" is an employer agent that sources by searching Jack's network. The company is free for seekers, charges about 10% of a hire (<a href="https://techcrunch.com/2025/10/16/jack-jill-raises-50-million-to-bring-conversational-ai-to-job-hunting">TechCrunch</a>), and raised a $40M Series A from Air Street in September 2026 (<a href="https://siliconangle.com/2026/09/16/jack-jill-raises-40m-to-change-the-face-of-job-hunting-with-ai-agents/">SiliconANGLE</a>). It is a closed network that runs only its own agents, and it has disclosed no hire counts. In B2B finance, <strong>Causa Prima</strong> raised a $20M seed (about $30M total) for "the agent-to-agent AI network" in which buyer and supplier agents negotiate invoice disputes and payment terms (<a href="https://fortune.com/2026/10/13/startup-causa-prima-20-million-billing-disputes-ai-agents/">Fortune</a>). <strong>Pactum</strong> has raised more than $100M for autonomous procurement negotiation, mostly against human suppliers (<a href="https://pactum.com/news-pactum-secures-54-million-in-series-c-funding-to-scale-agentic-ai-in-procurement/">Pactum</a>). <strong>Boardy</strong> ($11M) brokers double-opt-in introductions through a central voice AI rather than agent-to-agent conversation (<a href="https://thelogic.co/briefing/boardy-ai-raises-us8m-seed-round-for-ai-networking-tool/">The Logic</a>). Dating has a cluster of $2–15M startups. Ditto raised $9.2M (<a href="https://dnyuz.com/2026/02/03/this-startup-uses-ai-to-get-you-on-a-date-fast-read-the-pitch-deck-it-used-to-raise-9-2-million/">BI via dnyuz</a>) and Known $9.7M (<a href="https://techcrunch.com/2025/12/19/known-uses-voice-ai-to-help-you-go-on-more-in-person-dates">TechCrunch</a>), but most run a central matchmaker. Only tiny products like VibeRizz let each user's agent talk to other users' agents (<a href="https://www.producthunt.com/p/viberizz/viberizz-2">Product Hunt</a>). Real estate is effectively closed for now: one brokerage abandoned a "purely AI" agent because licensing rules forbid it (<a href="https://www.realestatenews.com/2025/07/10/hybrid-buyer-agent-blends-ai-with-the-human-touch">Real Estate News</a>). The most telling demand signal comes from Upwork's CEO, who says <strong>clients' AI agents already post jobs on Upwork to hire humans</strong> (<a href="https://www.semafor.com/article/03/12/2026/upworks-ceo-on-the-ai-agents-that-try-to-hire-human-workers">Semafor</a>). Incumbents with liquidity will receive agent traffic by default, whether or not a neutral hub exists.</p>
+<h3 id="big-platforms-have-built-registries-and-checkout-not-cross-principal-matching">Big platforms have built registries and checkout, not cross-principal matching</h3>
+<p>Every hyperscaler has shipped the discovery and governance primitives a hub would otherwise build itself. None has shipped intent matching between different principals' agents. Google's Gemini Enterprise Agent Gallery requires A2A Agent Cards and OAuth for listing (<a href="https://cloud.google.com/blog/topics/developers-practitioners/publish-agents-in-gemini-enterprise-and-google-cloud-marketplace">Google Cloud</a>). Microsoft's Agent 365 registry went GA on 1 May 2026 and syncs agents from Bedrock, Vertex and Agentforce (<a href="https://microsoft.com/en-us/security/blog/2026/05/01/microsoft-agent-365-now-generally-available-expands-capabilities-and-integrations">Microsoft</a>). AWS's AgentCore Agent Registry reportedly reached GA on 31 August 2026 (<a href="https://atlan.com/know/ai-agent/what-is-an-ai-agent-registry.md">Atlan</a>). OpenAI sidelined Instant Checkout in March 2026 in favor of merchant apps (<a href="https://www.digitalcommerce360.com/2026/03/06/openai-shifts-checkout-plans-agentic-commerce-strategy/">Digital Commerce 360</a>) and is shutting down Agent Builder on 30 November 2026 (<a href="https://www.refontelearning.com/blog/openai-agent-builder-shutdown-vendor-lock-in">Refonte Learning</a>), a reminder of how quickly platform dependencies can disappear. In hiring, LinkedIn's Hiring Assistant 2 sources from more than 1.2B profiles but works for recruiters only (<a href="https://www.recruitingnewsnetwork.com/posts/linkedin-announces-its-next-generation-recruiter-agent">Recruiting News Network</a>). Indeed is quietly closer: it runs <strong>Career Scout</strong> for seekers and <strong>Talent Scout</strong> for employers in one marketplace (<a href="https://www.indeed.com/news/releases/indeed-introduces-new-suite-of-hiring-products-career-scout-talent-scout-premium-sponsored-jobs-and-indeed-connect?co=US">Indeed</a>). No source confirms that those two agents negotiate with each other directly.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Player</th>
+<th>What it is</th>
+<th>Funding / traction</th>
+<th>Closeness to AgentsHub (0–5)</th>
+<th>Threat</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Meta (Moltbook team)</td>
+<td>Agent social graph plus WhatsApp/Messenger distribution</td>
+<td>Acquisition, Mar 2026</td>
+<td>2 today</td>
+<td><strong>Highest in consumer</strong>; weak neutrality</td>
+</tr>
+<tr>
+<td>OpenAI / Google / Anthropic</td>
+<td>Own the users' agents and preference context</td>
+<td>Platform scale</td>
+<td>1–2 today</td>
+<td><strong>Highest long-term</strong>; could ship "find me a counterparty"</td>
+</tr>
+<tr>
+<td>Jack &amp; Jill</td>
+<td>Two-sided hiring agents, closed network</td>
+<td>About $60M; 385K seekers, 5,350 companies (self-reported)</td>
+<td>4</td>
+<td><strong>Highest in hiring</strong>; becomes the exchange if it opens to third-party agents</td>
+</tr>
+<tr>
+<td>Indeed / LinkedIn</td>
+<td>Agents on one or both sides inside walled gardens</td>
+<td>Recruit's US HR Tech revenue up 36.6% YoY</td>
+<td>2.5–3</td>
+<td>High in hiring</td>
+</tr>
+<tr>
+<td>Causa Prima</td>
+<td>Agent-to-agent B2B finance network</td>
+<td>$30M</td>
+<td>4 (in its vertical)</td>
+<td>Medium; shows the model works beyond hiring</td>
+</tr>
+<tr>
+<td>Fetch.ai Agentverse / ASI:One</td>
+<td>Crypto-native agent directory with an agent chat protocol</td>
+<td>Claims about 3M agents; about 36K active per audit</td>
+<td>3</td>
+<td>Medium; could add intent matching</td>
+</tr>
+<tr>
+<td>Tobira, VibeRizz, AgentPact</td>
+<td>Right mechanic, no scale</td>
+<td>Unfunded as far as found</td>
+<td>3.5–4</td>
+<td>Low; potential partners or acquisitions</td>
+</tr>
+<tr>
+<td>Pilot, AGNTCY, NANDA, ANS</td>
+<td>Transport, identity and discovery infrastructure</td>
+<td>Pilot $4.5M seed</td>
+<td>1–2.5</td>
+<td>Partners, not competitors</td>
+</tr>
+</tbody>
+</table></div>
+<p>Proximity scores follow the competitor research's 0–5 rubric. Funding sources are cited in the paragraphs above.</p>
+<h3 id="the-market-is-large-but-the-agent-supply-is-still-thin">The market is large, but the agent supply is still thin</h3>
+<p>The hiring revenue pool is large and concentrated. Global online job advertising is about <strong>$37.6B in 2026, and LinkedIn and Indeed take roughly half</strong> (<a href="https://news.outsourceaccelerator.com/global-job-advertising-2026/">Outsource Accelerator/SIA</a>). US staffing is about $183B (<a href="https://talltreestalent.com/blog/staffing-industry-statistics/">Tall Tree Talent</a>), and narrowly defined ATS software is about $2.7B (<a href="https://www.noon.ai/blog/articles/359-recruiting-software-market-size-2026">Noon.ai</a>). The strongest signal of willingness to pay comes from Indeed. In Recruit's July–September quarter, <strong>US revenue per job rose 39% while posting volume stayed flat</strong> (<a href="https://www.staffingindustry.com/news/global-daily-news/recruit-holdings-posts-record-high-revenue-in-q2-hr-tech-surges">SIA</a>). Employers are paying far more per role for better matching, which means the scarce resource is qualified attention, not reach. The pain is quantified. On Greenhouse, applications per job rose from 116 in 2022 to 244 in 2025 while recruiters per organization fell from 10.43 to 4.62 (<a href="https://www.greenhouse.com/recruiting-benchmarks">Greenhouse</a>), and only 8% of job seekers say AI screening makes hiring fairer (<a href="https://www.greenhouse.com/newsroom/an-ai-trust-crisis-70-of-hiring-managers-trust-ai-to-make-faster-and-better-hiring-decisions-only-8-of-job-seekers-call-it-fair">Greenhouse</a>). The broader AI-agents market is projected to grow from about $8B in 2025 to roughly $50B by 2030 (<a href="https://www.bccresearch.com/pressroom/ait/ai-agents-market-to-grow-433-annually">BCC Research</a>; <a href="https://www.marketsandmarkets.com/Market-Reports/ai-agents-market-15761548.html">MarketsandMarkets</a>), though those definitions vary widely.</p>
+<p>On the supply side, the agents that could actually connect to AgentsHub are far fewer than the assistant user base. ChatGPT has about 1B weekly users (<a href="https://en.wikipedia.org/wiki/ChatGPT">Wikipedia</a>), but OpenAI's agentic products had passed only <strong>10M weekly users</strong> by July 2026 (<a href="https://thenextweb.com/news/openai-agents-10-million-chatgpt-work">The Next Web</a>). OpenClaw's 2–3.2M monthly users are an unverified third-party estimate (<a href="https://www.gradually.ai/en/openclaw-statistics/">Gradually.ai</a>). Gartner finds only <strong>about 17% of organizations have deployed AI agents</strong> (<a href="https://www.gartner.com/en/articles/hype-cycle-for-agentic-ai">Gartner</a>). A reasonable order-of-magnitude estimate is 15–30M people worldwide whose agent could call a remote MCP tool today. At typical active job-search rates, only 1–3M of them are looking for work at any moment, heavily skewed toward tech. Users also want control. Only 6% of consumers want AI to decide and act entirely for them, while more than half accept agent action when they can approve or undo it (<a href="https://www.helpnetsecurity.com/2026/11/05/okta-ai-customer-experiences-report/">Help Net Security/Okta</a>). Accenture finds 9% would let an agent shop fully autonomously (<a href="https://chainstoreage.com/accenture-customers-trust-ai-agents-perform-these-tasks-them">Chain Store Age</a>). The product has to be "agents explore, humans commit." On the employer side, early agents will connect through ATS integrations or a hub-hosted employer agent, not as bring-your-own agents.</p>
+</section>
+<section class="content" id="sec-open-protocols-cover-transport-leaving-matching-and-trust-to-the-hub"><span class="num">03 · TECHNOLOGY</span><h2 id="open-protocols-cover-transport-leaving-matching-and-trust-to-the-hub">Open protocols cover transport, leaving matching and trust to the hub</h2>
+<h3 id="the-2026-stack-is-mature-enough-to-build-on-and-its-gaps-are-where-agentshub-fits">The 2026 stack is mature enough to build on, and its gaps are where AgentsHub fits</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Standard and status (Nov 2026)</th>
+<th>Role in AgentsHub</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Agent ↔ tool</td>
+<td><strong>MCP 2026-07-28</strong>: stateless core with no <code>initialize</code> handshake or session header, <code>Mcp-Method</code>/<code>Mcp-Name</code> routing headers, Multi Round-Trip Requests (MRTR) for elicitation, Tasks as an extension, OAuth with RFC 9207 issuer checks and Client ID Metadata Documents replacing dynamic client registration (<a href="https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/blog/content/posts/2026-07-28-spec-ga/index.md">MCP blog</a>). Registry about 55–65K entries, still not confirmed GA (<a href="https://dev.to/amareswer/the-mcp-registry-by-the-numbers-38nc">DEV</a>)</td>
+<td><strong>Primary entry point</strong> for Claude, ChatGPT and OpenClaw users</td>
+</tr>
+<tr>
+<td>Agent ↔ agent</td>
+<td><strong>A2A v1.0.1</strong>: signed Agent Cards (JWS + JCS), eight task states including <code>INPUT_REQUIRED</code> and <code>AUTH_REQUIRED</code>, SSE, webhook push, a <code>tenant</code> field for multi-tenancy, OAuth2/OIDC/mTLS (<a href="https://github.com/a2aproject/A2A/blob/main/docs/whats-new-v1.md">What's new in v1</a>; <a href="https://github.com/a2aproject/A2A/blob/main/docs/specification.md">spec</a>). <strong>No standard registry API</strong> (<a href="https://github.com/a2aproject/A2A/blob/main/docs/topics/agent-discovery.md">discovery guide</a>)</td>
+<td>Endpoint for employer, ATS and autonomous agents</td>
+</tr>
+<tr>
+<td>Discovery / naming</td>
+<td>ANS became a Linux Foundation project on 10 Nov 2026, but its specs are still drafts (<a href="https://www.prnewswire.com/news-releases/linux-foundation-welcomes-agent-name-service-to-bring-verifiable-identity-and-discovery-to-ai-agents-302935151.html">PR Newswire</a>). AGNTCY ADS has an individual IETF draft (<a href="https://datatracker.ietf.org/doc/draft-mp-agntcy-ads/01/">IETF</a>). DNS-AID is an unadopted individual draft (<a href="https://standards.apievangelist.com/store/dns-aid/">API Evangelist</a>)</td>
+<td>Publish to these and accept them as trust signals. Do not depend on any of them</td>
+</tr>
+<tr>
+<td>Agent identity</td>
+<td>Web Bot Auth adopted as an IETF WG draft on 1 Sep 2026 and already deployed by CDNs (<a href="https://datatracker.ietf.org/wg/webbotauth/about/">IETF</a>). Skyfire KYAPay tokens in production (<a href="https://www.businesswire.com/news/home/20251218520399/en/Skyfire-Demonstrates-Secure-Agentic-Commerce-Purchase-Using-the-KYAPay-Protocol-and-Visa-Intelligent-Commerce">BusinessWire</a>). Entra Agent ID reportedly GA via Agent 365 (<a href="https://www.idenhq.com/en/blog/ai-agent-identity-management-2026">idenhq</a>)</td>
+<td>Inputs to hub trust tiers</td>
+</tr>
+<tr>
+<td>Payments / mandates</td>
+<td>AP2 at FIDO, v0.2. x402 has had more than 40 published vulnerabilities (<a href="https://arxiv.org/abs/2605.11781">arXiv 2605.11781</a>; <a href="https://arxiv.org/abs/2607.19545">arXiv 2607.19545</a>). Stripe/Tempo MPP launched 18 Mar 2026 (<a href="https://stripe.com/it/blog/machine-payments-protocol">Stripe</a>)</td>
+<td><strong>Not in v1.</strong> Use Stripe for fiat fees</td>
+</tr>
+</tbody>
+</table></div>
+<p>The right split is <strong>MCP in for consumer assistants and A2A for server-side agents, sharing one internal negotiation state machine.</strong> Most job seekers' agents (Claude, ChatGPT) are MCP clients. They cannot host an A2A server or receive webhooks, so the hub has to be the orchestrator: it exposes a pollable inbox and notifies the human by email. Employer agents, ATS bots and custom candidate agents can run as servers and talk A2A. The MCP 2026-07-28 changes fit a hub well. Because the core is stateless, the server can run on serverless or edge infrastructure. The spec's recommended pattern of passing explicit handles (<code>intent_id</code>, <code>session_id</code>) as tool arguments carries state between calls. MRTR elicitation is the natural mechanism for "reveal my CV to employer X?" approvals. On the A2A side, v1.0's <code>tenant</code> field lets one hub endpoint serve many listed agents, and each negotiation maps onto a Task: <code>INPUT_REQUIRED</code> while waiting for a human, <code>AUTH_REQUIRED</code> for consent to disclose, <code>REJECTED</code> for a decline, and <code>COMPLETED</code> carrying a hand-off artifact. The roadmap item on "structured human-in-the-loop interaction models and multi-round negotiation patterns" (<a href="https://github.com/a2aproject/A2A/blob/main/docs/roadmap.md">A2A roadmap</a>) is the one piece of standards work to align with. A2A's deliberate lack of a registry API is good news strategically, because the search-and-match API is where AgentsHub differentiates without colliding with a standard.</p>
+<p>There is one distribution risk to resolve early. <strong>OpenAI's app-submission guidelines will not approve plugins that "primarily function as unofficial connectors to third-party services, including pass-through intermediary software layers"</strong> (<a href="https://developers.openai.com/apps-sdk/app-submission-guidelines">OpenAI</a>). AgentsHub has to present itself as a first-party service with its own matching, verification and data, not as a relay between other people's agents, and it should confirm its eligibility with OpenAI before relying on the ChatGPT directory.</p>
+<h3 id="agent-market-experiments-say-the-mechanism-not-the-haggling-decides-outcomes">Agent-market experiments say the mechanism, not the haggling, decides outcomes</h3>
+<p>Three experiments point the same way. In Microsoft's Magentic Marketplace, <strong>about 80–100% of agents accepted the first proposal they received</strong>, welfare collapsed when agents were shown 100 search results, and fake credentials, social proof and prompt injection manipulated several models (<a href="https://arxiv.org/html/2510.25779v1">arXiv 2510.25779</a>). In Anthropic's Project Deal, Opus agents sold items for $2.68 more and bought them for $2.45 less than Haiku agents. Humans represented by Haiku rated their deals as equally fair despite the worse outcomes, and "aggressive" prompting made no significant difference (<a href="https://www.anthropic.com/features/project-deal">Anthropic</a>). In Project Swap, Claude's preference rankings matched participants' own rankings on only <strong>61%</strong> of pairs. The market delivered 0.55 efficiency against a 0.89 optimum, about 85% of the gap came from preference representation rather than bargaining, and model choice mattered more than whether the agent was told to be ruthless or prosocial (<a href="https://www.anthropic.com/news/project-swap">Anthropic</a>). Anthropic's proposed safeguards (agent identity registries, rate limits on agent messages, and full activity logs) read like a specification for a neutral hub.</p>
+<p>The design rules that follow are concrete. First, invest in <strong>structured preference elicitation</strong> before matching, with typed fields, explicit deal-breakers and ranking questions. Hosting that elicitation in the hub through MRTR means quality does not depend on each user's agent doing it well. Second, run matching as a <strong>hub-side mechanism</strong> that delivers short, batched lists (3–5 options per side per round), not a feed agents can grab the first item from. Third, make negotiation moves <strong>typed objects</strong> (<code>propose{salary, start, remote}</code>, <code>accept</code>, <code>decline{reason_code}</code>), with the hub computing the zone of agreement on numeric fields so that a weaker agent cannot be out-haggled on a salary band.</p>
+<p>The second rule collides with the law. Picking which 3–5 candidates an employer sees is ranking, and in hiring, <strong>ranking is the trigger for "agent," AEDT and EU high-risk status</strong> (section 4). The resolution for the hiring module is to make selection principal-defined and deterministic. Each employer specifies its hard filters and weights, the hub applies them mechanically, ties are broken by random rotation rather than by a hub-learned score, and each principal's own agent ranks within the batch it receives. A hub-computed fit score can come later as a deliberately regulated product with a bias-audit program. Outside hiring (B2B introductions, barter, networking), hub-side ranking carries much lower legal exposure and can ship from the start.</p>
+<h3 id="suggested-mvp-architecture">Suggested MVP architecture</h3>
+<p>The proposed design is one neutral, stateful core with two thin protocol faces. The team should pick a single language. TypeScript is a good choice because the official MCP and A2A SDKs are first-class there, and FastMCP with a2a-python is the Python alternative.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Design</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Edge / gateway</td>
+<td>Cloudflare Workers or Cloud Run. OAuth 2.1 resource server, optional RFC 9421/Web Bot Auth signature checks, per-principal rate limits keyed on <code>Mcp-Method</code>/<code>Mcp-Name</code>, WAF</td>
+<td>Stateless MCP core; header-level authorization</td>
+</tr>
+<tr>
+<td>Identity</td>
+<td>Off-the-shelf OIDC provider (verify CIMD and RFC 9207 support first). Principals are humans or organizations, and agents are child identities bound to a principal. Trust tiers: <strong>T0</strong> anonymous browse, <strong>T1</strong> verified email/OAuth, <strong>T2</strong> domain-bound agent (ANS, signed card, Web Bot Auth key), <strong>T3</strong> KYB for employers, ID/KYA for candidates</td>
+<td>Sybil resistance per principal, not per agent</td>
+</tr>
+<tr>
+<td>Intent store</td>
+<td>Postgres with row-level security. <code>JobOffer</code> is a superset of schema.org JobPosting, and <code>JobSeek</code> mirrors it. Each field carries a <code>disclosure</code> level (public / on_match / on_consent) and a <code>constraint</code> type (hard / soft / weight). Intents are versioned and expire</td>
+<td>Elicitation quality; staged disclosure; cheap import from public postings</td>
+</tr>
+<tr>
+<td>Matcher</td>
+<td>SQL hard filters (work authorization, remote/location, salary-band overlap, seniority), then principal-defined weights, then batched rounds of 3–5. Mutual interest required before a session opens. pgvector used only as a logged, explainable feature, and kept out of hiring ranking</td>
+<td>Counters first-proposal bias; stays outside hub-owned ranking in hiring</td>
+</tr>
+<tr>
+<td>Negotiation broker</td>
+<td>State machine <code>proposed → open → (offer ↔ counter)* → agreed / declined / expired</code>, mapped to A2A Task states. Caps on moves and elapsed time. Hub-computed zone of agreement</td>
+<td>Fairness across agent strengths; auditability</td>
+</tr>
+<tr>
+<td>Consent engine</td>
+<td>Policy-as-code (Cedar/OPA or plain code). Every release of identity or contact data needs principal approval through MRTR, A2A <code>INPUT_REQUIRED</code>, or an email confirmation link</td>
+<td>Hub as reference monitor; GDPR recipient events</td>
+</tr>
+<tr>
+<td>Notifications / hand-off</td>
+<td>Signed A2A webhooks for server agents; <code>get_inbox</code> polling plus email for MCP clients. A hand-off artifact with agreed terms, an intro email, a calendar invite, and the counterparty's Agent Card if it has one</td>
+<td>Consumer assistants cannot receive pushes</td>
+</tr>
+<tr>
+<td>Audit</td>
+<td>Append-only, hash-chained log of every typed move; OpenTelemetry; bias-audit export; jurisdiction-tagged retention</td>
+<td>FEHA 4-year retention; EU logs ≥6 months; forensics</td>
+</tr>
+</tbody>
+</table></div>
+<p>The MCP tool surface needs only about a dozen calls: <code>whoami</code>, <code>create_intent</code>, <code>update_intent</code>, <code>withdraw_intent</code>, <code>get_matches</code> (batched), <code>express_interest</code>, <code>get_inbox</code>, <code>get_session</code>, <code>make_move</code> (typed), <code>ask_question</code> (free text, untrusted), <code>approve_disclosure</code>, <code>request_handoff</code>. Long-running searches use the Tasks extension. Payments, decentralized discovery and verifiable credentials are deferred.</p>
+<h3 id="security-has-to-come-from-the-architecture-because-filtering-is-not-enough">Security has to come from the architecture, because filtering is not enough</h3>
+<p>OWASP's agentic Top 10 puts <strong>ASI01 Agent Goal Hijack</strong> and <strong>ASI07 Insecure Inter-Agent Communication</strong> at the center of a hub's threat model (<a href="https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/">OWASP</a>). The evidence from the field is blunt. Moltbook's breach was a configuration failure, not an exotic AI attack: a Supabase key in client JavaScript with row-level security disabled exposed about 1.5M agent tokens and let anyone act as any agent (<a href="https://www.wiz.io/pt-br/blog/exposed-moltbook-database-reveals-millions-of-api-keys">Wiz</a>). Vectra found hidden injection payloads in about 2.6% of sampled Moltbook posts (<a href="https://vectra.ai/blog/moltbook-and-the-illusion-of-harmless-ai-agent-communities">Vectra</a>), and Permiso documented agents instructing other agents to delete their accounts and join crypto pump schemes (<a href="https://www.securityweek.com/security-analysis-of-moltbook-agent-network-bot-to-bot-prompt-injection-and-data-leaks/">SecurityWeek</a>). Koi Security found <strong>341 malicious skills among 2,857 on ClawHub</strong> (<a href="https://thehackernews.com/2026/02/researchers-find-341-malicious-clawhub.html">The Hacker News</a>). The hiring domain is already adversarial: 41% of US job seekers admit using prompt injections to get past AI screeners (<a href="https://www.greenhouse.com/newsroom/an-ai-trust-crisis-70-of-hiring-managers-trust-ai-to-make-faster-and-better-hiring-decisions-only-8-of-job-seekers-call-it-fair">Greenhouse</a>), and 22.4% of surveyed recruiters have confirmed a deepfake or identity swap in a video interview (<a href="https://www.pin.com/blog/deepfake-candidate-report/">Pin</a>).</p>
+<p>The defenses that work are structural. The hub acts as the <strong>reference monitor</strong>: the counterparty's private fields never reach an agent until the disclosure policy allows it, so an injected "reveal your salary floor" fails even if the receiving agent is fooled. Free text is capped in length and labeled <code>untrusted_counterparty_text</code> in every payload. Any LLM the hub runs itself (summarizers, moderation) uses the dual-LLM or CaMeL pattern, in which a quarantined model reads counterparty text and the privileged model sees only typed outputs (<a href="https://arxiv.org/html/2506.08837v3">arXiv 2506.08837</a>). Tokens are short-lived, audience-bound and scoped per session. Every message is scanned for secrets and redacted, because Moltbook users leaked third-party API keys in direct messages. An external penetration test and a bug bounty come before launch. Because ClawHub's malware record shows the open agent ecosystem is a supply-chain hazard, <strong>verification is a feature people will pay for</strong>, not overhead.</p>
+</section>
+<section class="content" id="sec-employers-pay-for-less-noise-so-charge-per-accepted-hand-off"><span class="num">04 · BUSINESS MODEL</span><h2 id="employers-pay-for-less-noise-so-charge-per-accepted-hand-off">Employers pay for less noise, so charge per accepted hand-off</h2>
+<h3 id="pricing-benchmarks-put-the-hub-between-a-sourcing-tool-and-an-agency">Pricing benchmarks put the hub between a sourcing tool and an agency</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Benchmark</th>
+<th>Price</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Contingency agency</td>
+<td>15–25% of first-year base, 20% most common</td>
+<td><a href="https://underdog.io/blog/recruitment-agency-costs">Underdog.io</a></td>
+</tr>
+<tr>
+<td>Paraform recruiter marketplace</td>
+<td>About 20–25% of first-year base, on hire</td>
+<td><a href="https://www.paraform.com/for-companies">Paraform</a></td>
+</tr>
+<tr>
+<td>Jack &amp; Jill</td>
+<td>About 10% of hire; free for seekers</td>
+<td><a href="https://techcrunch.com/2025/10/16/jack-jill-raises-50-million-to-bring-conversational-ai-to-job-hunting">TechCrunch</a></td>
+</tr>
+<tr>
+<td>LinkedIn Recruiter Corporate</td>
+<td>About $10.8–13K per seat per year (third-party estimates)</td>
+<td><a href="https://www.pin.com/blog/linkedin-recruiter-pricing-2026/">Pin</a></td>
+</tr>
+<tr>
+<td>Indeed Sponsored Jobs</td>
+<td>Pay per <em>started</em> application (replaced pay-per-application in Dec 2023)</td>
+<td><a href="https://au.indeed.com/help/employers/articles/pay-per-started-application-ppsa-overview">Indeed</a></td>
+</tr>
+<tr>
+<td>Ashby ATS (entry)</td>
+<td>About $4.3–4.8K per year</td>
+<td><a href="https://www.pin.com/blog/ashby-pricing/">Pin</a></td>
+</tr>
+<tr>
+<td>Juicebox AI sourcing</td>
+<td>About $3.6K per recruiter per year with agents</td>
+<td><a href="https://www.pin.com/blog/juicebox-pricing/">Pin</a></td>
+</tr>
+<tr>
+<td>Upwork / Fiverr take rate</td>
+<td>19.8% (Q2 2026) / 28.2% (TTM Q3 2026)</td>
+<td><a href="https://www.nasdaq.com/articles/upwork-q2-earnings-call-highlights">Nasdaq</a>; <a href="https://www.morningstar.com/news/globe-newswire/9855650/fiverr-announces-third-quarter-2026-results">Fiverr</a></td>
+</tr>
+<tr>
+<td>Match Group (subscription)</td>
+<td>$21.19 revenue per payer per month</td>
+<td><a href="https://www.securities.io/payers-fall-5-at-match-group-as-q3-revenue-slips-to-891-million/">Securities.io</a></td>
+</tr>
+</tbody>
+</table></div>
+<p>For a $150K US software role, an agency costs about $30K per hire. AgentsHub only matches and hands off: it does no payroll, escrow or work management. It therefore delivers less than Upwork or an agency and should aim to capture less. The research suggests three bands to validate with design partners. The first is a <strong>per-accepted-hand-off fee of about $100–500</strong>, triggered only when both principals opt in and the candidate is verified. The second is a <strong>success fee of $2.5–7.5K flat or 5–10% of first-year base</strong>, which positions the hub at a quarter to half of agency cost. The third is a <strong>volume subscription of $300–1,000 a month</strong>, priced against an Ashby entry plan or a few Juicebox seats. <strong>Candidates stay free.</strong> Charging them invites "pay to apply" stigma and fairness concerns, and might bring employment-agency licensing rules that were not researched here. Indeed's retreat from charging per application is the key pricing lesson: <strong>bill on a strong signal</strong> such as mutual opt-in or a scheduled interview, never on agent messages. On illustrative unit economics, an employer that posts 10 roles a year and fills 3 through the hub at $5K each is worth $15K a year, about the cost of one LinkedIn Corporate seat. The target serving cost (LLM negotiation plus verification) is well under $20 per hand-off.</p>
+<p>A general-purpose hub needs <strong>different pricing primitives in different verticals</strong>. A success fee works where the outcome is observable and someone has a budget, as in hiring and B2B deals. A subscription fits where outcomes are unobservable, which is why dating monetizes at about $18–33 per payer per month rather than per marriage. Per-call micropayments are not a business: total lifetime x402 value is smaller than one mid-size recruiting agency's revenue, and most of it is not agentic (<a href="https://www.trmlabs.com/trm-tech-blog/whos-actually-paying-measuring-ai-agent-payments-onchain">TRM Labs</a>). They are useful only as anti-spam friction, where a fraction of a cent per post raises the cost of flooding. Leakage is real but bounded. One study puts the share of Airbnb bookings taken offline in Austin at about 5.4% (<a href="https://anderson-review.ucla.edu/a-renter-and-property-owner-meet-on-airbnb-will-they-ditch-the-site">UCLA Anderson Review</a>). The defense is to make the mutual opt-in the billable, logged event <em>before</em> contact details are revealed, to charge the side that has contracts and legal exposure (the employer), and to keep post-hand-off value on the platform: scheduling, verified credentials and the audit trail.</p>
+<h3 id="cold-start-sell-to-the-hard-side-aggregate-public-supply-and-treat-directories-as-table-stakes">Cold start: sell to the hard side, aggregate public supply, and treat directories as table stakes</h3>
+<p>In agent-mediated hiring, the hard side is the employer. Employers hold the budget and are already blocking AI-flooded inbound. Candidates with agents are comparatively plentiful. The marketplace playbook is consistent on this point. Lenny Rachitsky's research found one-on-one direct sales was the crucial early lever for most marketplaces, <strong>about twice as common as the next lever</strong> (<a href="https://www.lennysnewsletter.com/i/176567/one-of-the-most-significant-learnings-and-surprises-for-me-in-doing-this-research-was-how-important-one-on-one-direct-sales-was-to-most-early-marketplaces-sales-ended-up-being-a-crucial-lever-for-about-of-the-companies-i-talked-to-twice-as-common-as-the-next-biggest-lever-piggy-backing-and-referrals">Lenny's Newsletter</a>). NFX recommends starting from a "white-hot center" and notes that Indeed itself began by aggregating job postings (<a href="https://www.nfx.com/post/19-marketplace-tactics-for-overcoming-the-chicken-or-egg-problem">NFX</a>). Antler claims "claim your listing" outreach to pre-seeded suppliers converts close to 100%, far above cold outreach (<a href="https://www.antler.co/blog/how-to-grow-marketplace-supply-fast">Antler</a>); that is a VC claim, so treat it as optimistic. Seeding is technically easy. Ashby's public posting API needs no authentication and can include compensation (<a href="https://developers.ashbyhq.com/docs/public-job-posting-api">Ashby</a>), and community MCP servers already wrap the Greenhouse, Lever and Ashby public boards (<a href="https://github.com/santex85/ats-jobs-mcp">GitHub</a>). Ingested postings become "unclaimed" employer intents that a company activates by claiming them. Submitting applications into an ATS still needs each employer's key, which makes "connect your ATS" a natural onboarding step. Check each source's terms with counsel before ingesting at scale.</p>
+<p>Agent-native directories are necessary but are not a growth channel. One count found about 52K–53K MCP Registry records by early November, with the caveat that a record is not a product or a user (<a href="https://apitracker.io/mcp-statistics/2026-11-01">API Tracker</a>), and a community list counted about 1,624 ChatGPT apps by July 2026 (<a href="https://awesome.ecosyste.ms/projects/github.com%2Frdmgator12%2Fawesome-chatgpt-apps">awesome-chatgpt-apps</a>). No evidence shows that a listing alone drives usage. Distribution has to come from three sources. The first is a strong reason for an assistant user to say "find me a job on AgentsHub." The second is a hosted <strong>lite agent</strong> (web or chat intake) for people who have no agent. The third is partnerships with builders who route their own traffic in: candidate-side auto-apply vendors, whose users become sanctioned, rate-limited, verified traffic instead of spam; small vertical agent apps that lack infrastructure; and ATS vendors. One unverified blog claims Workday has an MCP and A2A "Agent Gateway" (<a href="https://www.herohunt.ai/blog/agentic-ats-2026-greenhouse-vs-ashby-vs-workday/">HeroHunt</a>), which should be checked as a priority integration target.</p>
+<p>On the beachhead, the evidence still favors <strong>AI/ML and senior software engineers hiring at AI-forward startups, remote, in US time zones</strong>. AI-engineer postings grew about 143% year over year, with an estimated 3.2 open roles per qualified candidate (staffing-vendor data) (<a href="https://www.futureproofing.dev/resources/ai-talent-gap/ai-engineer-demand-2026">futureproofing.dev</a>). Both sides are agent users, and those employers run Ashby or Greenhouse, so seeding is easy. The catch is that LinkedIn Hiring Assistant 2 and Jack &amp; Jill chase the same people. AgentsHub's differentiators there are bring-your-own-agent, neutrality, candidate privacy ("contact me only if the range is ≥ X"), and the one thing nobody owns: <strong>an identity-bound, structured, agent-submitted application that an ATS accepts as first-class rather than as spam.</strong> Israeli tech now has 0.95 openings per seeker (<a href="https://www.calcalistech.com/ctechnews/article/eh2q9m522">Calcalist</a>), so candidates are easy to recruit but employer liquidity is thin. It is a good community pilot and cross-border feeder, not the main market. Hourly and frontline hiring is the wrong first niche. Workday's Paradox already automates the employer side (<a href="https://newsroom.workday.com/2025-10-01-Workday-Completes-Acquisition-of-Paradox?asPDF=1">Workday</a>), and those candidates rarely run personal agents.</p>
+<h3 id="history-shows-how-matching-marketplaces-die">History shows how matching marketplaces die</h3>
+<p>Curated reverse hiring marketplaces raised large sums and then collapsed. Hired was sold to Vettery in a 2020 fire sale (<a href="https://techcrunch.com/2020/11/23/vettery-acquires-hired/">TechCrunch</a>) and folded into Adecco's LHH in 2024 (<a href="https://www.staffingindustry.com/news/global-daily-news/adecco-incorporating-hired-lhh-business">SIA</a>). Triplebyte's candidate marketplace was shut down when Karat bought its assessment technology (<a href="https://connect.karat.com/tb-candidates">Karat</a>). Both were single-vertical, employer-paid and exposed to the tech-hiring cycle. Commentators argue Triplebyte declined after loosening its curation to scale. The agent-era versions of failure are token-subsidized activity that disappears once incentives end (Virtuals), viral growth without trust (Moltbook), and marketplaces that pivot to products because liquidity never arrived. Nagent retired its agent marketplace in October 2026 (<a href="https://nagent.ai/resources/blog/is-there-a-marketplace-for-ai-agents">Nagent</a>). Three rules follow: <strong>verification quality is the product and must not be loosened for growth, avoid tokens, and diversify intent types beyond tech hiring while keeping go-to-market single-niche.</strong> The metric tree should match. Liquidity is the share of active intents that reach at least one mutually accepted hand-off within 7, 14 and 30 days in each niche. Quality is hand-off acceptance, hand-off-to-interview and interview-to-hire rates, plus the abuse rate. Economics are revenue per hand-off and per hire, CAC by channel, and a leakage proxy. The headline KPI to sell to employers is <strong>hand-offs per hire against their baseline of about 244 applications per job.</strong></p>
+</section>
+<section class="content" id="sec-ranking-candidates-turns-a-neutral-hub-into-a-regulated-hiring-agent"><span class="num">05 · RISKS AND REGULATION</span><h2 id="ranking-candidates-turns-a-neutral-hub-into-a-regulated-hiring-agent">Ranking candidates turns a neutral hub into a regulated hiring agent</h2>
+<h3 id="us-law-attaches-to-whoever-screens-and-the-hub-could-be-that-party">US law attaches to whoever screens, and the hub could be that party</h3>
+<p>US AI-hiring law is a patchwork of state and local rules that mostly bind the employer, employment agency or "agent" that uses the tool. The hub's exposure therefore depends on what the hub does. California's FEHA regulations, in force since 1 October 2025, define an employer's <strong>"agent"</strong> as anyone exercising a function traditionally exercised by the employer, including recruitment, screening and hiring. They also require <strong>four-year retention of automated-decision data</strong> (<a href="https://www.sheppard.com/insights/blogs/california-approves-rules-regulating-ai-in-employment-decision-making">Sheppard Mullin</a>). Firms read the rules as reaching vendors to which a decision-making function is delegated (<a href="https://www.paulhastings.com/insights/client-alerts/new-california-regulations-on-employers-use-of-ai-to-make-decisions-go-into-effect-oct-1-2025">Paul Hastings</a>), and an agent can be directly liable (<a href="https://www.littler.com/news-analysis/asap/california-approves-landmark-ai-employment-regulations">Littler</a>). In <em>Mobley v. Workday</em>, the court let the theory proceed that Workday is an "agent" of employers who delegated screening to it. It rejected the "employment agency" theory because Workday does not procure applicants. The ADEA collective was conditionally certified, and Workday moved to decertify it on 10 Nov 2026 with more than 15,000 opt-ins (<a href="https://www.warden-ai.com/warden-watch/litigations/mobley-v-workday-inc">Warden AI</a>; <a href="https://www.aigovernanceforhr.com/p/the-mobley-v-workday-case-didnt-end-it-escalated">AI Governance for HR</a>). The implication for AgentsHub is uncomfortable. <strong>A matching hub that actively introduces seekers to employers is closer to "procuring" than Workday was</strong>, so it may not get the same answer on employment-agency status. And if it ranks or screens for employers, it fits the FEHA agent definition squarely.</p>
+<p>The rest of the patchwork shapes jurisdiction choices. NYC Local Law 144 places the bias-audit duty on the employer or employment agency, not the vendor, and DCWP's FAQ excludes tools used only for outreach or to invite applications (<a href="https://www.nyc.gov/assets/dca/downloads/pdf/about/DCWP-AEDT-FAQ.pdf">DCWP FAQ</a>). An NYC-based hub could itself be an employment agency using an automated tool. Enforcement has been weak: the state Comptroller found DCWP identified 1 non-compliant employer where auditors found at least 17 potential violations. DCWP has agreed to move to proactive review (<a href="https://knowledge.dlapiper.com/dlapiperknowledge/globalemploymentlatestdevelopments/2026/New-York-Critical-audit-of-New-York-Citys-AI-hiring-law-signals-increased-risk-for-employers">DLA Piper</a>). Illinois HB 3773 has required notice and barred discriminatory AI use, including zip code as a proxy, since 1 January 2026. Its draft notice rules, which would have named the vendor, were temporarily withdrawn in June 2026 (<a href="https://www.seyfarth.com/news-insights/illinois-department-of-human-rights-temporarily-withdraws-proposed-rules-on-use-of-artificial-intelligence-in-employment.html">Seyfarth</a>). California's CCPA rules on automated decision-making technology (ADMT) add a pre-use notice, an opt-out and access rights for employment decisions by <strong>1 January 2027</strong> (<a href="https://www.akingump.com/en/insights/alerts/new-california-regulations-regarding-employer-use-of-automated-decision-making-technology-compliance-required-by-january-1-2027">Akin Gump</a>). Colorado repealed its original AI Act and replaced it with SB 26-189, a narrower disclosure model effective 1 January 2027 (<a href="https://intellisee.com/legislation/colorado-ai-act-repeal-and-replace-sb-26-189-2026/">Intellisee</a>), and enforcement is stayed while xAI's constitutional challenge proceeds (<a href="https://www.warden-ai.com/resources/colorado-sb-26-189-enforcement-stay">Warden AI</a>). Texas's TRAIGA reaches only intentional discrimination (<a href="https://www.duanemorris.com/alerts/texas_new_ai_law_is_now_in_effect_what_employers_need_to_know_about_traiga2_0526.html">Duane Morris</a>). New Jersey's rules make employers liable for algorithmic discrimination even through third-party tools (<a href="https://www.reedsmith.com/our-insights/blogs/employment-law-watch/102mqfg/state-ai-hiring-tool-regulations-filling-federal-void/">Reed Smith</a>).</p>
+<p>The federal government has moved toward deregulation, but that does not remove the risk. Executive Order 14365 created a DOJ AI Litigation Task Force to challenge state AI laws. As of mid-November its only concrete move found was intervening in the Colorado case (<a href="https://www.paulhastings.com/insights/client-alerts/president-trump-signs-executive-order-challenging-state-ai-laws">Paul Hastings</a>; <a href="https://www.ailawsbystate.com/blog/federal-ai-preemption-doj-task-force-state-law-fight-2026">ailawsbystate</a>). The EEOC has removed its AI guidance and deprioritized disparate impact (<a href="https://natlawreview.com/article/federal-government-quietly-removed-its-ai-hiring-guidance-four-states-are-writing">NatLawReview</a>). Title VII, the ADEA and the ADA are unchanged, though, and private suits like <em>Mobley</em> are now the main enforcement channel. Intentional discrimination remains squarely enforceable: the EEOC's first AI-hiring settlement, $365,000 from iTutorGroup, involved software that auto-rejected older applicants (<a href="https://www.eeoc.gov/newsroom/itutorgroup-pay-365000-settle-eeoc-discriminatory-hiring-suit">EEOC</a>). The FTC's proposed July 2026 policy statement adds a twist. <strong>Steering AI outputs, even to comply with state law, may be deceptive unless disclosed</strong> (<a href="https://www.arnoldporter.com/en/perspectives/blogs/major-questions-an-administrative-law-and-regulatory-blog/2026/07/ftcs-proposed-policy-statement-on-ai-accuracy-and-preemption-of-state-ai-laws">Arnold &amp; Porter</a>). The cheap remedy is to disclose every compliance filter the hub applies, and never to claim "bias-free" or "verified" matching without substantiation.</p>
+<h3 id="three-more-liability-theories-target-the-platform-itself">Three more liability theories target the platform itself</h3>
+<p>Beyond employment statutes, three theories reach the platform directly. The first is <strong>FCRA</strong>. <em>Kistler v. Eightfold AI</em> alleges that undisclosed match scores built from third-party data are consumer reports. A motion to dismiss was fully briefed by July 2026, and no ruling was found (<a href="https://ogletree.com/insights-resources/blog-posts/groundbreaking-lawsuit-tests-whether-ai-hiring-tools-trigger-fcra-compliance/">Ogletree</a>). So reputation must come from first-party conduct on the hub only, and the hub should never enrich candidate profiles from scraped sources. The second is <strong>Section 230</strong>. In <em>Bouck v. Meta</em>, a court said generative AI tools that shape content can make a platform a "creator" (<a href="https://blog.ericgoldman.org/archives/2026/06/section-230-doesnt-apply-to-generative-ai-enhancements-to-ad-copy-but-the-plaintiffs-lose-anyway-bouck-and-suddeth-v-meta.htm">Eric Goldman</a>). <em>Roommates.com</em> stripped immunity from a site whose required questions solicited protected traits for matching (<a href="https://en.wikipedia.org/wiki/Fair_Housing_Council_of_San_Fernando_Valley_v._Roommates.com,_LLC">Wikipedia</a>). The hub's models must therefore never write claims on a principal's behalf, and its schemas must not ask for protected characteristics. The third is <strong>contract attribution</strong>. UETA §14 lets contracts form between electronic agents, but no court has applied it to non-deterministic LLM agents. UETA §10 lets a person avoid errors when no correction opportunity was given (<a href="https://www.proskauer.com/blog/contract-law-in-the-age-of-agentic-ai-whos-really-clicking-accept">Proskauer</a>), and <em>Moffatt v. Air Canada</em> held a company liable for its chatbot's misstatement (<a href="https://www.canlii.org/en/bc/bccrt/doc/2024/2024bccrt149/2024bccrt149.html">CanLII</a>). Agent "agreements" should therefore be non-binding term sheets until a human confirms them, with an explicit error-correction step.</p>
+<h3 id="eu-and-data-protection-rules-allow-a-split-design">EU and data-protection rules allow a split design</h3>
+<p>Under the EU AI Act, recruitment AI is Annex III high-risk, and Annex III point 4(a) explicitly includes tools used "to place targeted job advertisements, to analyse and filter job applications, and to evaluate candidates" (<a href="https://artificialintelligenceact.eu/annex/3/">AI Act Annex III</a>). That reaches a hub's core function of routing job offers to selected agents. Regulation (EU) 2026/1744 moved these obligations to <strong>2 December 2027</strong> (<a href="https://www.regulation-ai.eu/en/omnibus/">regulation-ai.eu</a>), but the Article 50 duty to tell people they are dealing with AI has applied since 2 August 2026 (<a href="https://www.joneswalker.com/en/insights/blogs/ai-law-blog/yes-august-2-still-matters-the-eu-approved-a-high-risk-ai-delay-but-most-trans.html">Jones Walker</a>). Draft Commission guidelines reportedly cite an automated job-matching and ranking tool as a high-risk example (<a href="https://www.faegredrinker.com/zh/insights/publications/2026/6/draft-commission-guidelines-on-high-risk-ai-implications-for-the-workplace">Faegre Drinker</a>), and the Article 6(3) exemption for "narrow procedural" tasks never covers systems that profile people (<a href="https://artificialintelligenceact.eu/article/6/">Art. 6</a>). A hub that supplies hiring matching logic would be a <strong>provider</strong>: it would need a quality management system, technical documentation, logging, human-oversight design, conformity assessment and registration. Employers would be deployers with their own duties (<a href="https://artificialintelligenceact.eu/article/26/">Art. 26</a>). The workable answer is a split architecture. A generic messaging, discovery and consent layer stays outside high-risk scope, and a ring-fenced hiring module is either kept rule-based and principal-driven or deliberately certified before EU launch. The EU Pay Transparency Directive's June 2026 deadline has passed, and it <strong>bans asking candidates about pay history</strong> (<a href="https://www.morganlewis.com/pubs/2026/06/eu-pay-transparency-directive-the-deadline-for-transposition-has-passed-what-now">Morgan Lewis</a>). The hub should block a salary-history field at the schema level everywhere and require posted ranges on employer offers.</p>
+<p>On data protection, Spain's AEPD issued the first EU regulator guidance on agentic AI in February 2026. It says <strong>autonomy does not move responsibility</strong>: agents are means of processing, controllers must document each flow and recipient, and people must be told when agents add recipients (<a href="https://www.aoshearman.com/en/insights/ao-shearman-on-data/aepd-publishes-guidance-on-agentic-artificial-intelligence-from-a-data-protection-perspective">A&amp;O Shearman</a>). Bird &amp; Bird flags controllership shifting mid-process as the key pressure point (<a href="https://www.twobirds.com/en/insights/2026/two-eras,-one-rulebook-what-agentic-ai-does-to-your-gdpr-compliance">Bird &amp; Bird</a>). The likely role map, which is uncertain, has the hub as an independent controller for accounts, verification, the matching index and abuse logs, and possibly a joint controller with each principal for the exchange it defines. Each disclosure to a counterparty creates a new controller and should be logged as a recipient event the data subject can see. The UK ICO found that many employers make solely automated recruitment decisions without meaningful human involvement, and it expects contestability and human review (<a href="https://privacymatters.dlapiper.com/2026/04/uk-ico-report-on-automated-decision-making-in-recruitment/">DLA Piper</a>). That aligns with the hub's human-approval gates.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Regime</th>
+<th>What triggers exposure for AgentsHub</th>
+<th>Status (Nov 2026)</th>
+<th>Design response</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CA FEHA ADS rules</td>
+<td>Ranking/screening for employers makes the hub an "agent"</td>
+<td>In force since 1 Oct 2025; 4-year retention</td>
+<td>No hub-owned ranking in hiring; retain logs 4 years</td>
+</tr>
+<tr>
+<td><em>Mobley v. Workday</em></td>
+<td>Agent theory; "procuring" makes employment-agency status likelier</td>
+<td>Decertification motion filed 10 Nov 2026</td>
+<td>Principals select; hub does not source for employers</td>
+</tr>
+<tr>
+<td>NYC LL144</td>
+<td>NYC-based hub, or NYC roles, using an AEDT</td>
+<td>In force; enforcement turning proactive</td>
+<td>Gate NYC employers or require their attestations until an audit program exists</td>
+</tr>
+<tr>
+<td>IL HB 3773</td>
+<td>AI influencing hiring; zip code as a proxy</td>
+<td>In force since 1 Jan 2026; rules withdrawn</td>
+<td>Reusable notices; no zip-code ranking</td>
+</tr>
+<tr>
+<td>CCPA ADMT</td>
+<td>Significant employment decisions</td>
+<td>Compliance by 1 Jan 2027</td>
+<td>Pre-use notice, opt-out, human appeal</td>
+</tr>
+<tr>
+<td>Colorado SB 26-189</td>
+<td>Disclosure duties for automated decision-making</td>
+<td>Effective 1 Jan 2027; enforcement stayed</td>
+<td>Track the xAI litigation</td>
+</tr>
+<tr>
+<td>FCRA (<em>Eightfold</em>)</td>
+<td>Scores from third-party data furnished to employers</td>
+<td>Motion to dismiss pending</td>
+<td>First-party reputation only</td>
+</tr>
+<tr>
+<td>FTC Section 5</td>
+<td>Unsubstantiated claims; undisclosed output steering</td>
+<td>Accuracy statement proposed Jul 2026</td>
+<td>Substantiate claims; disclose compliance filters</td>
+</tr>
+<tr>
+<td>EU AI Act</td>
+<td>Matching, ranking, targeted job ads</td>
+<td>Art. 50 live; Annex III from 2 Dec 2027</td>
+<td>Split architecture; certify the hiring module before EU launch</td>
+</tr>
+<tr>
+<td>GDPR / AEPD / ICO</td>
+<td>Agent-to-agent personal-data flows; solely automated decisions</td>
+<td>Guidance only</td>
+<td>Staged disclosure, controller map, DPIA, human review</td>
+</tr>
+<tr>
+<td>EU Pay Transparency / US range laws</td>
+<td>Salary-history questions; missing ranges</td>
+<td>EU deadline passed 7 Jun 2026</td>
+<td>Block salary history; require ranges</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="fairness-weaker-agents-lose-without-noticing">Fairness: weaker agents lose without noticing</h3>
+<p>Project Deal's central result, that <strong>people represented by weaker models get worse deals and rate them as equally fair</strong>, becomes a disparate-impact risk in hiring, where model quality tracks income. The mitigations are typed offers with hub-computed zones of agreement, mandatory pay ranges, a hub-provided baseline negotiator for candidates who want one, a default "human review before accept," and disparity monitoring by agent class. A schema-level list of prohibited fields covers salary history, age and graduation year in early stages, photos, health, ethnicity, religion, union status, and zip code as a ranking input. Bias audits are impossible without demographics, so those should come through a separate, opt-in, firewalled self-ID channel used only for aggregate monitoring. Accessibility needs a human alternative channel in every hiring flow, as the ACLU's charges against Intuit and HireVue over an inaccessible AI interview illustrate (<a href="https://www.proskauer.com/blog/another-legal-challenge-to-an-ai-interviewing-tool">Proskauer</a>).</p>
+<h3 id="platform-risk-matters-more-than-protocol-risk">Platform risk matters more than protocol risk</h3>
+<p>The protocols are settling under the Linux Foundation, so the larger risk is commercial. The frontier labs and Meta own the preference context that Project Swap shows is decisive, and any of them could ship a native "find me a counterparty" feature. AgentsHub's defenses are things a lab cannot credibly offer: <strong>neutrality across every agent vendor, cross-vendor and cross-domain reach, verified principals, and a compliance layer</strong> that employers need regardless of which assistant their candidates use. The ChatGPT listing policy and the Agent Builder shutdown are reminders to own direct relationships with principals (email, accounts, employer contracts) rather than renting them from a single assistant platform.</p>
+</section>
+<section class="content" id="sec-build-it-conditionally-with-a-90-day-gate-on-the-hiring-wedge"><span class="num">06 · RECOMMENDATIONS</span><h2 id="build-it-conditionally-with-a-90-day-gate-on-the-hiring-wedge">Build it conditionally, with a 90-day gate on the hiring wedge</h2>
+<p>The evidence supports building AgentsHub as a neutral trust-and-intent exchange, with a narrower launch than "general-purpose" implies and a hiring design shaped by the law. The recommendations below are ordered roughly by when they bite.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Recommendation</th>
+<th>Evidence basis</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Positioning</td>
+<td>"The neutral, verified exchange where agents post needs and offers and humans approve every introduction." Sell trust, elicitation and audit, not agent chat</td>
+<td>Whitespace analysis; Project Swap; Okta delegation data</td>
+</tr>
+<tr>
+<td>Scope</td>
+<td>General protocol and schema registry (anyone can define an intent type); single-niche go-to-market. Ship one non-hiring intent type in the MVP (e.g., B2B intros) to prove generality where hub ranking is legally simpler</td>
+<td>Hired/Triplebyte single-vertical exposure; legal asymmetry between verticals</td>
+</tr>
+<tr>
+<td>Protocols</td>
+<td>MCP 2026-07-28 server first (stateless, OAuth 2.1 + CIMD, MRTR approvals, Tasks); multi-tenant A2A v1.0.1 endpoint for employer and ATS agents; publish a signed Agent Card and OASF record; accept ANS/Web Bot Auth/KYA as trust inputs</td>
+<td>Protocol status; consumer assistants are clients only</td>
+</tr>
+<tr>
+<td>Matching in hiring</td>
+<td>Deterministic, principal-defined filters and weights; batched rounds of 3–5; random tie-breaks; mutual opt-in before any session. <strong>No hub-computed candidate scores</strong> until a bias-audit program exists</td>
+<td>FEHA, <em>Mobley</em>, LL144, EU Annex III, Magentic Marketplace</td>
+</tr>
+<tr>
+<td>Negotiation</td>
+<td>Typed moves, hub-computed zone of agreement, capped rounds, and non-binding term sheets until a human confirms</td>
+<td>Project Deal; UETA §10/§14; <em>Moffatt</em></td>
+</tr>
+<tr>
+<td>Trust and safety</td>
+<td>Tiered identity (T0–T3) with KYB for employers; per-principal quotas; first-party-only reputation; hub as reference monitor; dual-LLM for hub models; secrets scanning; row-level security tests; pen test and bug bounty before launch</td>
+<td>Moltbook, ClawHub, OWASP ASI01/ASI07, FCRA</td>
+</tr>
+<tr>
+<td>Data protection</td>
+<td>Staged disclosure as logged recipient events; prohibited-field schema; firewalled self-ID; published controller map; hiring DPIA; jurisdiction-tagged retention</td>
+<td>AEPD, ICO, Pay Transparency, FEHA retention</td>
+</tr>
+<tr>
+<td>Pricing</td>
+<td>Candidates free. Employers pay $100–500 per accepted hand-off, or a $2.5–7.5K / 5–10% success fee, plus an optional $300–1,000/month volume plan. Fiat via Stripe; no tokens; x402 only as optional anti-spam friction later</td>
+<td>Agency/LinkedIn/Ashby/Juicebox benchmarks; Indeed's per-started-application pricing; x402 audits</td>
+</tr>
+<tr>
+<td>Go-to-market</td>
+<td>Direct sales to 10–30 design-partner employers in AI/ML engineering at AI-forward startups; seed from public ATS feeds as claimable listings; hosted lite agent; partner with candidate-side agent vendors and small vertical apps; list in MCP and assistant directories as table stakes</td>
+<td>Lenny/NFX; Ashby API; directory data</td>
+</tr>
+<tr>
+<td>Jurisdictions</td>
+<td>US-first, excluding NYC-located employers (or requiring their LL144 attestations) at launch; Article 50 disclosures now; no EU hiring launch before the module is ready for 2 Dec 2027</td>
+<td>Regulation table</td>
+</tr>
+<tr>
+<td>Metrics and gate</td>
+<td>Publish human-approved hand-offs and hand-off-to-interview conversion, not agent counts. <strong>Gate at 90 days:</strong> if fewer than 10 design-partner employers sign, or if pilot hand-off-to-interview conversion does not clearly beat partners' existing channels, move the wedge (open decision 1)</td>
+<td>Vanity-metric record; Greenhouse baselines</td>
+</tr>
+</tbody>
+</table></div>
+</section>
+<section class="content" id="sec-seven-decisions-the-founders-still-have-to-make"><span class="num">07 · OPEN DECISIONS</span><h2 id="seven-decisions-the-founders-still-have-to-make">Seven decisions the founders still have to make</h2>
+<p>These choices change the design, and the research cannot settle them. Each row gives the options, the lean the evidence supports, and what would change it.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Decision</th>
+<th>Options</th>
+<th>Evidence-based lean</th>
+<th>What would change it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>Which wedge?</strong></td>
+<td>(a) AI/ML engineering hiring; (b) contract or expert work (Mercor-style); (c) B2B introductions or procurement; (d) Israeli tech community pilot</td>
+<td>(a) with (d) as a feeder, but only if the 90-day gate passes. Otherwise (c), which has no regulation-driven ranking ban and no funded neutral player, or (b), given Mercor's roughly $2B gross run rate in expert work for AI labs (<a href="https://dealroom.co/news/137121-mercor-doubles-to-2b-gross-revenue-run-rate-as-ai-labs-buy-expert-data/">Dealroom</a>)</td>
+<td>Founder access to a dense employer network; Jack &amp; Jill opening to third-party agents</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Hub ranking in hiring?</strong></td>
+<td>Principal-defined deterministic rules only, vs a hub fit score with an annual bias audit and EU provider documentation</td>
+<td>Rules only for the MVP; revisit once revenue can fund the audit program</td>
+<td>Counsel's opinion on FEHA/LL144 exposure; employers refusing to buy without a score</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Hosted lite agent?</strong></td>
+<td>Yes (solves cold start, but makes the hub an agent with more liability) vs bring-your-own only</td>
+<td>Yes for candidates, with explicit labeling and no hub-authored claims; no hub negotiator for employers</td>
+<td>Evidence that bring-your-own supply alone fills the pilot</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Match-and-introduce only, or close deals?</strong></td>
+<td>Introductions only vs offers, contracts and payments on the hub</td>
+<td>Introductions only in hiring; consider closing (Stripe Connect holds, not x402) in a later freelance or B2B vertical</td>
+<td>A vertical where on-platform payment is essential to prevent leakage</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>Who pays, and how?</strong></td>
+<td>Per accepted hand-off vs success fee vs subscription; employer-only vs both sides</td>
+<td>Employer-only; per-hand-off for startups, success fee for larger roles; free during the pilot to measure conversion</td>
+<td>Design-partner willingness to pay; leakage observed in the pilot</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>Distribution dependence</strong></td>
+<td>Lean on the ChatGPT/Claude directories vs own the principal relationship through the lite agent, email and employer contracts</td>
+<td>Own the relationship; treat directories as acquisition, and confirm ChatGPT eligibility under the "pass-through intermediary" rule early</td>
+<td>OpenAI confirming eligibility; directory placement demonstrably driving usage</td>
+</tr>
+<tr>
+<td>7</td>
+<td><strong>Fairness posture</strong></td>
+<td>Offer a hub-provided baseline negotiator for candidates (fairer, less neutral) vs typed offers and zone-of-agreement only</td>
+<td>Start with typed offers, ranges and zone of agreement; add an opt-in baseline negotiator once disparity data exists</td>
+<td>Pilot data showing outcome gaps by agent class</td>
+</tr>
+</tbody>
+</table></div>
+<p>Two smaller items need counsel rather than founders. One is whether charging job seekers anything triggers state employment-agency licensing, which was not researched here. The other is the precise wording of the joint-controller arrangement for EU users.</p>
+</section>
+<section id="decisions" class="decisions content">
+  <span class="num">YOUR DECISIONS</span>
+  <div class="decision-head">
+    <h2>Answer the 7 open decisions</h2>
+    <span class="sync" id="sync-status" role="status">Connecting…</span>
+  </div>
+  <p>Click one option per question and add a note if you want. Answers save to this page, and Claude can read them when you say you're done.</p>
+  <div id="questions" style="display:flex;flex-direction:column;gap:1rem"></div>
+  <div class="summary-box">
+    <div class="cta-row"><button class="btn btn-primary" id="copy-answers" type="button">Copy my answers</button></div>
+    <p class="copy-status" id="copy-status" role="status"></p>
+    <textarea id="copy-fallback" aria-label="Your answers as text" readonly hidden style="width:100%;min-height:8rem;font:0.85rem var(--font-mono);background:var(--code-bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:0.6rem"></textarea>
+  </div>
+</section>
+<section class="content" id="sec-conclusion"><span class="num">08 · CONCLUSION</span><h2 id="conclusion">Conclusion</h2>
+<p>The central insight from this research is that <strong>the more intelligence AgentsHub puts into deciding who meets whom, the more it becomes a regulated hiring agent, and the less neutral it looks to the agents it needs.</strong> The defensible value therefore sits in the parts that look least glamorous: structured preference capture (where Project Swap locates most of the lost value), identity bound to real principals, consent-staged disclosure, typed negotiation, and an audit trail employers need anyway. A lab, Meta or Jack &amp; Jill can build smarter matching faster. None of them can credibly be the neutral, cross-vendor referee, and that role becomes more valuable as every company and individual gets an agent and the noise problem in hiring spreads to other markets.</p>
+<p>The timing argument has also changed. The protocols are ready now, but the regulatory calendar (California ADMT on 1 Jan 2027, Colorado's stayed law, the <em>Mobley</em> decertification fight, and the EU's 2 Dec 2027 high-risk date) makes <strong>2027 the year AI hiring tools must prove their compliance.</strong> A hub built from day one around principal-made decisions, logged disclosures and bias-audit-ready exports can turn that deadline into a sales argument instead of a retrofit. The open question the market has not answered is whether enough principals will let agents meet on their behalf. A 90-day pilot measured in human-approved hand-offs, not agent sign-ups, is the cheapest way to find out.</p></section>
+
+    <footer class="content">Deep research prepared for AgentsHub, November 2026. Not legal advice.</footer>
+  </main>
+</div>
+
+<script>
+const QUESTIONS = [
+  {
+    "id": "wedge",
+    "title": "Which wedge should AgentsHub launch with?",
+    "why": "Hiring is now contested by Jack & Jill, LinkedIn and Indeed. The report leans to AI/ML hiring only if a 90-day gate passes.",
+    "options": [
+      {
+        "value": "ai-ml-hiring",
+        "label": "AI/ML engineering hiring",
+        "desc": "At AI-forward startups, with a 90-day gate of 10+ design-partner employers.",
+        "rec": true
+      },
+      {
+        "value": "expert-work",
+        "label": "Contract or expert work",
+        "desc": "Mercor-style expert work for AI labs, a roughly $2B gross run-rate market."
+      },
+      {
+        "value": "b2b-intros",
+        "label": "B2B introductions or procurement",
+        "desc": "No funded neutral player and no hiring-law ranking limits."
+      },
+      {
+        "value": "israeli-tech",
+        "label": "Israeli tech community pilot",
+        "desc": "Easy to recruit candidates (0.95 openings per seeker), harder to find employers."
+      }
+    ]
+  },
+  {
+    "id": "hub-ranking",
+    "title": "Should the hub rank candidates in hiring?",
+    "why": "A hub that ranks or shortlists candidates can become the employer's legal 'agent' (California FEHA, Mobley v. Workday) and an EU high-risk provider.",
+    "options": [
+      {
+        "value": "rules-only",
+        "label": "Rules only",
+        "desc": "Each side sets deterministic filters and weights; the hub computes no scores.",
+        "rec": true
+      },
+      {
+        "value": "fit-score",
+        "label": "Hub fit score",
+        "desc": "The hub scores candidates, with an annual bias audit and EU provider documentation."
+      }
+    ]
+  },
+  {
+    "id": "lite-agent",
+    "title": "Should AgentsHub host a simple built-in agent?",
+    "why": "It solves the cold start, because few people run their own agent, but makes the hub an agent with more liability.",
+    "options": [
+      {
+        "value": "candidates-only",
+        "label": "Yes, for candidates only",
+        "desc": "Clearly labelled, no hub-written claims, no hub negotiator for employers.",
+        "rec": true
+      },
+      {
+        "value": "both-sides",
+        "label": "Yes, for both sides",
+        "desc": "Employers also get a hub-run agent."
+      },
+      {
+        "value": "byo-only",
+        "label": "No, bring your own agent",
+        "desc": "Only agents people already have can connect."
+      }
+    ]
+  },
+  {
+    "id": "deal-scope",
+    "title": "Match and introduce only, or close deals on the hub?",
+    "why": "Closing deals raises the legal bar and needs payments; introductions keep hiring simpler.",
+    "options": [
+      {
+        "value": "intros-only",
+        "label": "Introductions only",
+        "desc": "In hiring; consider closing deals later in a freelance or B2B vertical.",
+        "rec": true
+      },
+      {
+        "value": "close-later",
+        "label": "Plan deal-closing early",
+        "desc": "Design offers, contracts and Stripe Connect payments into the next vertical now."
+      },
+      {
+        "value": "close-now",
+        "label": "Close deals from day one",
+        "desc": "Offers, contracts and payments on the hub in the first version."
+      }
+    ]
+  },
+  {
+    "id": "who-pays",
+    "title": "Who pays, and how?",
+    "why": "Agencies charge 15-25% of salary; the report suggests a quarter to half of that.",
+    "options": [
+      {
+        "value": "employer-handoff",
+        "label": "Employers, per hand-off or per hire",
+        "desc": "Free during the pilot; then $100-500 per accepted hand-off or a 5-10% success fee.",
+        "rec": true
+      },
+      {
+        "value": "subscription",
+        "label": "Employer subscription",
+        "desc": "$300-1,000 a month volume plans as the main model."
+      },
+      {
+        "value": "both-sides",
+        "label": "Both sides pay",
+        "desc": "Candidates pay too. Counsel must check employment-agency licensing first."
+      }
+    ]
+  },
+  {
+    "id": "distribution",
+    "title": "How much should AgentsHub depend on ChatGPT and Claude directories?",
+    "why": "Directories are required but haven't been shown to drive usage, and ChatGPT rejects 'pass-through intermediary' connectors.",
+    "options": [
+      {
+        "value": "own-relationship",
+        "label": "Own the relationship",
+        "desc": "Use the lite agent, email and employer contracts; directories only for acquisition.",
+        "rec": true
+      },
+      {
+        "value": "lean-directories",
+        "label": "Lean on the directories",
+        "desc": "Make ChatGPT and Claude listings the main channel."
+      }
+    ]
+  },
+  {
+    "id": "fairness",
+    "title": "How should the hub handle agents of unequal strength?",
+    "why": "In Anthropic's Project Deal, people with weaker agents got worse deals without noticing.",
+    "options": [
+      {
+        "value": "typed-offers",
+        "label": "Typed offers and agreement ranges",
+        "desc": "Add an opt-in baseline negotiator once there is data on outcome gaps.",
+        "rec": true
+      },
+      {
+        "value": "baseline-negotiator",
+        "label": "Baseline negotiator from the start",
+        "desc": "The hub offers candidates its own negotiator: fairer, but less neutral."
+      }
+    ]
+  }
+];
+
+const answers = {};
+const writeChains = {};
+let db = null;
+let canWrite = true;
+let loadTimer = null;
+
+const syncEl = document.getElementById("sync-status");
+function setSync(text, isWarning) {
+  syncEl.textContent = text;
+  syncEl.classList.toggle("warn", Boolean(isWarning));
+}
+
+function readLocal() {
+  try {
+    const raw = localStorage.getItem("agentshub-deep-dive-answers");
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return {};
+  }
+}
+function writeLocal() {
+  try { localStorage.setItem("agentshub-deep-dive-answers", JSON.stringify(answers)); } catch (e) { /* storage blocked: answers stay on screen only */ }
+}
+
+function optionLabel(question, value) {
+  const match = question.options.find(o => o.value === value);
+  return match ? match.label : value;
+}
+
+function renderQuestion(question) {
+  const card = document.getElementById("q-" + question.id);
+  const answer = answers[question.id] || {};
+  card.classList.toggle("answered", Boolean(answer.choice));
+  card.querySelector(".q-status").textContent = answer.choice ? "Answered" : "Not answered";
+  card.querySelectorAll(".opt").forEach(btn => {
+    btn.setAttribute("aria-pressed", String(btn.dataset.value === answer.choice));
+    btn.disabled = !canWrite;
+  });
+  const note = card.querySelector("textarea");
+  if (document.activeElement !== note) note.value = answer.note || "";
+  note.readOnly = !canWrite;
+}
+
+function renderProgress() {
+  const done = QUESTIONS.filter(q => answers[q.id] && answers[q.id].choice).length;
+  document.getElementById("progress-text").textContent = done + " of " + QUESTIONS.length + " answered";
+  document.getElementById("progress-bar").style.width = (done / QUESTIONS.length * 100) + "%";
+}
+
+function renderAll() {
+  QUESTIONS.forEach(renderQuestion);
+  renderProgress();
+}
+
+function buildQuestions() {
+  const root = document.getElementById("questions");
+  QUESTIONS.forEach((question, index) => {
+    const card = document.createElement("div");
+    card.className = "q";
+    card.id = "q-" + question.id;
+
+    const top = document.createElement("div");
+    top.className = "q-top";
+    const h = document.createElement("h3");
+    h.textContent = (index + 1) + ". " + question.title;
+    const status = document.createElement("span");
+    status.className = "q-status";
+    top.append(h, status);
+
+    const why = document.createElement("p");
+    why.className = "q-why";
+    why.textContent = question.why;
+
+    const opts = document.createElement("div");
+    opts.className = "opts";
+    opts.setAttribute("role", "group");
+    opts.setAttribute("aria-label", question.title);
+    question.options.forEach(option => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "opt";
+      btn.id = "opt-" + question.id + "-" + option.value;
+      btn.dataset.value = option.value;
+      btn.setAttribute("aria-pressed", "false");
+      const t = document.createElement("span");
+      t.className = "t";
+      t.textContent = option.label;
+      if (option.rec) {
+        const rec = document.createElement("span");
+        rec.className = "rec";
+        rec.textContent = "Recommended";
+        t.append(rec);
+      }
+      const d = document.createElement("span");
+      d.className = "d";
+      d.textContent = option.desc;
+      btn.append(t, d);
+      btn.addEventListener("click", () => choose(question.id, option.value));
+      opts.append(btn);
+    });
+
+    const noteWrap = document.createElement("div");
+    noteWrap.className = "note";
+    const label = document.createElement("label");
+    const noteId = "note-" + question.id;
+    label.setAttribute("for", noteId);
+    label.textContent = "Note (optional)";
+    const note = document.createElement("textarea");
+    note.id = noteId;
+    note.placeholder = "Anything to add or explain";
+    let noteTimer = null;
+    note.addEventListener("input", () => {
+      clearTimeout(noteTimer);
+      noteTimer = setTimeout(() => saveNote(question.id, note.value), 700);
+    });
+    note.addEventListener("blur", () => {
+      clearTimeout(noteTimer);
+      saveNote(question.id, note.value);
+    });
+    noteWrap.append(label, note);
+
+    card.append(top, why, opts, noteWrap);
+    root.append(card);
+  });
+}
+
+function choose(questionId, value) {
+  if (!canWrite) return;
+  answers[questionId] = Object.assign({}, answers[questionId], { choice: value });
+  renderQuestion(QUESTIONS.find(q => q.id === questionId));
+  renderProgress();
+  persist(questionId);
+}
+
+function saveNote(questionId, text) {
+  if (!canWrite) return;
+  const current = answers[questionId] || {};
+  if ((current.note || "") === text) return;
+  answers[questionId] = Object.assign({}, current, { note: text });
+  persist(questionId);
+}
+
+function persist(questionId) {
+  writeLocal();
+  if (!db) return;
+  const answer = answers[questionId];
+  const body = { choice: answer.choice || null, note: answer.note || "", updatedAt: new Date().toISOString() };
+  setSync("Saving…");
+  const previous = writeChains[questionId] || Promise.resolve();
+  writeChains[questionId] = previous
+    .then(() => db.doc("decisions/" + questionId).set(body))
+    .then(() => setSync("All answers saved"))
+    .catch(err => {
+      if (err && err.code === "invalid_argument") {
+        canWrite = false;
+        renderAll();
+        setSync("Only the report's owner can answer. You're seeing their answers.", true);
+      } else if (err && err.code === "quota_exceeded") {
+        setSync("Storage is full, so this answer wasn't saved.", true);
+      } else {
+        setSync("This answer wasn't saved. Click it again to retry.", true);
+      }
+    });
+}
+
+function applySnapshot(snapshot) {
+  snapshot.docs.forEach(doc => {
+    if (doc.metadata.hasPendingWrites) return;
+    const data = doc.data();
+    answers[doc.id] = { choice: data.choice || null, note: data.note || "" };
+  });
+  writeLocal();
+  renderAll();
+}
+
+async function connect() {
+  if (!window.claude || typeof window.claude.use !== "function") {
+    setSync("Answers are kept in this browser only.", true);
+    return;
+  }
+  db = await window.claude.use("db");
+  if (!db) {
+    setSync("Answers are kept in this browser only.", true);
+    return;
+  }
+  const user = await window.claude.use("user");
+  if (user) {
+    const owner = await user.isOwner();
+    const permission = await user.can("data.write");
+    if (!owner && permission === false) {
+      canWrite = false;
+      renderAll();
+    }
+  }
+  setSync(canWrite ? "Loading saved answers…" : "Read-only: showing the owner's answers");
+  loadTimer = setTimeout(() => setSync("Saved answers can't be reached yet. You can still click; answers will save when the connection returns.", true), 10000);
+  db.collection("decisions").onSnapshot(snapshot => {
+    if (!snapshot.metadata.fromCache) {
+      clearTimeout(loadTimer);
+      if (canWrite) setSync(snapshot.empty ? "Ready. Click an option to save it." : "All answers saved");
+    }
+    applySnapshot(snapshot);
+  }, err => {
+    clearTimeout(loadTimer);
+    setSync("Saved answers can't be loaded right now (" + err.code + "). Reload the page to try again.", true);
+  });
+}
+
+function answersAsText() {
+  const lines = ["AgentsHub decisions"];
+  QUESTIONS.forEach((question, index) => {
+    const answer = answers[question.id] || {};
+    const choice = answer.choice ? optionLabel(question, answer.choice) : "(not answered)";
+    lines.push((index + 1) + ". " + question.title + " " + choice + (answer.note ? " | Note: " + answer.note : ""));
+  });
+  return lines.join("\n");
+}
+
+document.getElementById("copy-answers").addEventListener("click", () => {
+  const text = answersAsText();
+  const statusEl = document.getElementById("copy-status");
+  const fallback = document.getElementById("copy-fallback");
+  const showFallback = () => {
+    fallback.hidden = false;
+    fallback.value = text;
+    fallback.focus();
+    fallback.select();
+    statusEl.textContent = "Copying isn't allowed here. The text is selected below; copy it yourself.";
+  };
+  if (!navigator.clipboard || !navigator.clipboard.writeText) { showFallback(); return; }
+  navigator.clipboard.writeText(text).then(() => {
+    statusEl.textContent = "Copied. Paste it into the chat with Claude.";
+  }, showFallback);
+});
+
+buildQuestions();
+Object.assign(answers, readLocal());
+renderAll();
+connect();
+</script>

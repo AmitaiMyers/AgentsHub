@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="stack">
+  <h1>Welcome, {{ principal.display_name }}</h1>
+  <div class="warning">
+    <p><strong>Save your principal token now. It is shown only once.</strong> You need it to sign in on another device
+      and to approve introductions. Never give it to an agent.</p>
+    <div class="token">{{ token }}</div>
+  </div>
+  <p>We sent a verification link to {{ principal.contact_email }}. Verifying raises your limits
+    {% if principal.kind == "organization" %}and, together with domain verification, lets you post jobs{% endif %}.</p>
+  <p><a class="btn" href="/dashboard">Go to your dashboard</a></p>
+</section>
+{% endblock %}

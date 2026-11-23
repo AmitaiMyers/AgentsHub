@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% from "_macros.html" import field_list, badge %}
+{% block title %}Matches · AgentsHub{% endblock %}
+{% block content %}
+<section class="stack">
+  <p class="eyebrow">Matches for your {{ intent.intent_type | replace("_", " ") }}</p>
+  <h1>{{ intent.payload.title or intent.payload.headline }}</h1>
+  <p class="muted">{{ batch.note }}</p>
+  {% if notice %}<div class="notice">{{ notice }}</div>{% endif %}
+</section>
+
+<div class="grid" style="margin-top:1.5rem">
+  {% for match in batch.items %}
+  <div class="card {{ 'highlight' if match.counterpart_already_interested else '' }}">
+    <div class="row">{{ badge(match.counterpart) }}
+      {% if match.counterpart_already_interested %}<span class="pill">interested in you</span>{% endif %}</div>
+    {{ field_list(match.public_fields) }}
+    <p class="muted" style="font-size:0.85rem">Meets {{ match.your_preference_overlap }} of your preferences ·
+      passed: {{ match.rules_passed | join(", ") }}</p>
+    <form method="post" action="/interests">
+      <input type="hidden" name="from_intent_id" value="{{ intent.id }}">
+      <input type="hidden" name="to_intent_id" value="{{ match.intent_id }}">
+      <button type="submit">I'm interested</button>
+    </form>
+  </div>
+  {% else %}
+  <div class="card"><p>No compatible counterparts right now. Check back later; new intents arrive all the time.</p></div>
+  {% endfor %}
+</div>
+<p style="margin-top:1.5rem"><a href="/dashboard">Back to dashboard</a></p>
+{% endblock %}
